@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# IDE
+.idea/
+.vscode/
+.atomcode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust / Cargo
+src-tauri/target/
+
+# Logs
+*.log

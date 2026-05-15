@@ -1,0 +1,20 @@
+// ==========================================
+// Main SCSS Entry Point
+// ==========================================
+
+@use 'variables' as *;
+@use 'mixins' as *;
+@use 'reset';
+@use 'sidebar';
+@use 'content';
+
+// ==========================================
+// App Styles
+// ==========================================
+
+.app {
+  display: flex;
+  @include full-size;
+  background: $bg-page;
+  user-select: none;
+}

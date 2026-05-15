@@ -1,0 +1,135 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+
+// ==========================================
+// Main Content Styles
+// ==========================================
+
+.main-content {
+  flex: 1;
+  @include flex-column;
+  background: $bg-page;
+  height: 100%;
+  overflow: hidden;
+}
+
+// Titlebar (drag region for overlay mode)
+.content-titlebar {
+  height: $titlebar-height;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+// Content Body
+.content-body {
+  flex: 1;
+  @include flex-column;
+  padding: 0 $spacing-section $spacing-section;
+  overflow: hidden;
+}
+
+// Welcome Area
+.welcome-area {
+  flex: 1;
+  @include flex-column-center;
+  gap: $spacing-md;
+  padding: 0 80px;
+}
+
+.welcome-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: $radius-lg;
+  background: $accent-primary-light;
+  @include flex-center;
+}
+
+.welcome-title {
+  font-size: $font-size-3xl;
+  font-weight: $font-weight-bold;
+  color: $text-primary;
+}
+
+.welcome-subtitle {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-normal;
+  color: $text-secondary;
+}
+
+// Suggestions
+.suggestions {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: $spacing-sm;
+}
+
+.suggestion-card {
+  width: 220px;
+  height: 140px;
+  padding: $spacing-md;
+  @include card-base;
+  @include flex-column;
+  gap: $spacing-sm;
+  cursor: pointer;
+}
+
+.suggestion-title {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  color: $text-primary;
+  margin-top: $spacing-sm;
+}
+
+.suggestion-desc {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-normal;
+  color: $text-secondary;
+  line-height: 1.4;
+}
+
+// Input Container
+.input-container {
+  @include flex-center;
+  gap: $spacing-standard;
+  padding: 14px 18px;
+  border-radius: $radius-card;
+  background: $bg-card;
+  box-shadow: $shadow-md;
+  width: 100%;
+}
+
+.input-field {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: $font-family;
+  font-size: $font-size-lg;
+  color: $text-primary;
+  outline: none;
+
+  &::placeholder {
+    color: $text-tertiary;
+  }
+}
+
+.send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: $radius-pill;
+  background: $accent-primary;
+  border: none;
+  @include flex-center;
+  cursor: pointer;
+  transition: background $transition-base;
+
+  &:hover {
+    background: $accent-primary-dark;
+  }
+}
+
+// Icon utilities
+.icon {
+  @include flex-center;
+  justify-content: center;
+}
