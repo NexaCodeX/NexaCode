@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  nexacode_lib::run();
+  nexacode_desktop_lib::run();
 }
