@@ -54,11 +54,25 @@
 
 // New Chat Button
 .new-chat-btn {
-  @include button-primary;
-  height: $input-height;
-  width: 100%;
-  border-radius: $radius-md;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: $spacing-sm;
+  padding: $spacing-standard $spacing-md;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: background $transition-base;
+  border: none;
+  background: transparent;
+  font-family: $font-family;
   font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  color: $text-secondary;
+  width: 100%;
+
+  &:hover {
+    background: $bg-muted;
+  }
 }
 
 // Chat List
@@ -121,7 +135,9 @@
 }
 
 .skills-header {
-  @include flex-center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
   gap: $spacing-sm;
   padding: $spacing-standard $spacing-md 6px;
 }
@@ -133,7 +149,9 @@
 }
 
 .skill-item {
-  @include flex-center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
   gap: $spacing-sm;
   padding: $spacing-standard $spacing-md;
   border-radius: $radius-sm;
@@ -149,4 +167,27 @@
   font-size: $font-size-base;
   font-weight: $font-weight-medium;
   color: $text-secondary;
+}
+
+// Settings Button
+.settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: $spacing-sm;
+  padding: $spacing-standard $spacing-md;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: background $transition-base;
+  border: none;
+  background: transparent;
+  font-family: $font-family;
+  font-size: $font-size-base;
+  font-weight: $font-weight-medium;
+  color: $text-secondary;
+  width: 100%;
+
+  &:hover {
+    background: $bg-muted;
+  }
 }

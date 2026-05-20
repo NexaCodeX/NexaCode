@@ -32,11 +32,13 @@ function App() {
 
   const [activeChatId, setActiveChatId] = useState<string>('1');
 
-  const skills: SkillItem[] = [
-    { id: '1', icon: 'code', name: 'Code Writer' },
-    { id: '2', icon: 'bug', name: 'Debugger' },
-    { id: '3', icon: 'layers', name: 'Architect' },
-  ];
+  const handleTextareaInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
+    const textarea = e.currentTarget;
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+  };
+
+  const skills: SkillItem[] = [];
 
   const suggestions: SuggestionItem[] = [
     {
@@ -77,10 +79,23 @@ function App() {
 
         {/* Sidebar body */}
         <div className="sidebar-body">
-          <button className="new-chat-btn">
-            <LucideIcon name="plus" size={16} color="#FFFFFF" />
-            <span>New Chat</span>
-          </button>
+          <div className="skills-menu">
+            <button className="new-chat-btn">
+              <LucideIcon name="plus" size={16} color="var(--text-secondary)" />
+              <span>New Chat</span>
+            </button>
+            <div className="skills-divider" />
+            <div className="skills-header">
+              <LucideIcon name="zap" size={16} color="var(--text-tertiary)" />
+              <span className="skills-header-text">Skills</span>
+            </div>
+            {skills.map((skill) => (
+              <div key={skill.id} className="skill-item">
+                <LucideIcon name={skill.icon} size={16} color="var(--text-secondary)" />
+                <span className="skill-item-text">{skill.name}</span>
+              </div>
+            ))}
+          </div>
 
           <div className="chat-list-container">
             {chats.map((chat) => (
@@ -97,19 +112,10 @@ function App() {
 
           <div className="spacer" />
 
-          <div className="skills-menu">
-            <div className="skills-divider" />
-            <div className="skills-header">
-              <LucideIcon name="zap" size={16} color="var(--text-tertiary)" />
-              <span className="skills-header-text">Skills</span>
-            </div>
-            {skills.map((skill) => (
-              <div key={skill.id} className="skill-item">
-                <LucideIcon name={skill.icon} size={16} color="var(--text-secondary)" />
-                <span className="skill-item-text">{skill.name}</span>
-              </div>
-            ))}
-          </div>
+          <button className="settings-btn">
+            <LucideIcon name="cog" size={16} color="var(--text-secondary)" />
+            <span>Settings</span>
+          </button>
         </div>
       </aside>
 
@@ -126,7 +132,7 @@ function App() {
             <h1 className="welcome-title">Welcome to NexaCode</h1>
             <p className="welcome-subtitle">How can I help you today?</p>
 
-            <div className="suggestions">
+            {/* <div className="suggestions">
               {suggestions.map((suggestion) => (
                 <div key={suggestion.id} className="suggestion-card">
                   <LucideIcon name={suggestion.icon} size={24} color={suggestion.iconColor} />
@@ -134,18 +140,45 @@ function App() {
                   <span className="suggestion-desc">{suggestion.description}</span>
                 </div>
               ))}
-            </div>
+            </div> */}
 
-            <div className="input-container">
-              <LucideIcon name="paperclip" size={20} color="var(--text-tertiary)" />
-              <input
-                type="text"
-                className="input-field"
-                placeholder="Message NexaCode..."
-              />
-              <button className="send-btn">
-                <LucideIcon name="send" size={18} color="#FFFFFF" />
-              </button>
+            <div className="input-area">
+              <div className="input-container">
+                <textarea
+                  className="input-field"
+                  placeholder="Message NexaCode..."
+                  rows={1}
+                  onInput={handleTextareaInput}
+                />
+                <div className="input-actions">
+                  <button className="attachment-btn">
+                    <LucideIcon name="plus" size={20} color="var(--text-tertiary)" />
+                  </button>
+                  <div className="right-actions">
+                    <select className="model-select">
+                      <option value="gpt-4">GPT-4</option>
+                      <option value="gpt-3.5">GPT-3.5</option>
+                      <option value="claude-3">Claude 3</option>
+                      <option value="claude-2">Claude 2</option>
+                    </select>
+                    <button className="send-btn">
+                      <LucideIcon name="send" size={18} color="#FFFFFF" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="options-container">
+                <div className="options-left">
+                  <select className="option-select">
+                    <option value="build">Build</option>
+                    <option value="plan">Plan</option>
+                  </select>
+                  <button className="folder-btn">
+                    <LucideIcon name="folder" size={16} color="var(--text-secondary)" />
+                    <span>Select Folder</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
