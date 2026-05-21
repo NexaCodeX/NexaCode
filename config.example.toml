@@ -1,0 +1,14 @@
+# NexaCode Configuration Example
+# This file will be automatically created at ~/.nexacode/config.toml
+
+[providers.openai]
+config = { provider_type = "openai", api_key = "sk-your-api-key", default_model = "gpt-4" }
+is_active = true
+
+[providers.claude]
+config = { provider_type = "anthropic", api_key = "sk-ant-your-api-key", default_model = "claude-3-5-sonnet-20241022" }
+is_active = false
+
+[providers.ollama]
+config = { provider_type = "openai_compatible", api_key = "ollama", base_url = "http://localhost:11434/v1", default_model = "llama2" }
+is_active = false

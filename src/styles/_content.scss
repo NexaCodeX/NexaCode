@@ -153,6 +153,57 @@
   gap: $spacing-sm;
 }
 
+.custom-model-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  
+  input {
+    width: 120px;
+    padding: 6px 10px;
+    font-size: $font-size-sm;
+    border: 1px solid $border-strong;
+    border-radius: 6px;
+    background: $bg-card;
+    color: $text-primary;
+    
+    &:focus {
+      outline: none;
+      border-color: $accent-primary;
+    }
+    
+    &::placeholder {
+      color: $text-tertiary;
+    }
+  }
+  
+  button {
+    padding: 6px;
+    border: 1px solid $border-subtle;
+    background: $bg-card;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all $transition-base;
+    
+    &:hover {
+      background: $bg-muted;
+    }
+  }
+}
+
+.custom-model-btn {
+  padding: 6px;
+  border: 1px solid $border-subtle;
+  background: $bg-card;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all $transition-base;
+  
+  &:hover {
+    background: $bg-muted;
+  }
+}
+
 .attachment-btn {
   width: 36px;
   height: 36px;
