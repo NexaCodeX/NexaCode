@@ -11,10 +11,29 @@
   background: $bg-page;
   height: 100%;
   overflow: hidden;
+  border-top-left-radius: $radius-card;
+  border-bottom-left-radius: $radius-card;
+  position: relative;
+  z-index: 10;
+  margin-left: -$radius-card;
+  padding-left: $radius-card;
+  border-left: 1px solid $border-subtle;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: -3px;
+    top: 0;
+    width: 6px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 100;
+  }
 }
 
 // Titlebar (drag region for overlay mode)
 .content-titlebar {
+  width: 100%;
   height: $titlebar-height;
   flex-shrink: 0;
   -webkit-app-region: drag;

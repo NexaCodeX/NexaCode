@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { ChatMessage, ChatResponse, StreamChunk, ProviderConfigResponse } from '../services/llm';
 import { LLMService } from '../services/llm';
 
@@ -6,6 +6,25 @@ export function useLLM() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
+
+  // Internal buffer for batching stream updates
+  const bufferRef = useRef('');
+  const rafIdRef = useRef<number | null>(null);
+
+  // Flush buffer to state via requestAnimationFrame
+  const flushBuffer = useCallback(() => {
+    const content = bufferRef.current;
+    setStreamingContent(content);
+    rafIdRef.current = null;
+  }, []);
+
+  // Append chunk to buffer and schedule a flush
+  const appendToBuffer = useCallback((delta: string) => {
+    bufferRef.current += delta;
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(flushBuffer);
+    }
+  }, [flushBuffer]);
 
   const chat = useCallback(
     async (
@@ -45,20 +64,33 @@ export function useLLM() {
       setIsLoading(true);
       setError(null);
       setStreamingContent('');
+      bufferRef.current = '';
 
       return new Promise((resolve) => {
         LLMService.chatStream(
           messages,
           model,
           (chunk: StreamChunk) => {
-            setStreamingContent((prev) => prev + chunk.delta);
+            appendToBuffer(chunk.delta);
           },
           (err: string) => {
+            // Flush any remaining buffer before handling error
+            if (rafIdRef.current !== null) {
+              cancelAnimationFrame(rafIdRef.current);
+              rafIdRef.current = null;
+            }
+            setStreamingContent(bufferRef.current);
             setError(err);
             setIsLoading(false);
             resolve();
           },
           () => {
+            // Flush any remaining buffer
+            if (rafIdRef.current !== null) {
+              cancelAnimationFrame(rafIdRef.current);
+              rafIdRef.current = null;
+            }
+            setStreamingContent(bufferRef.current);
             setIsLoading(false);
             resolve();
           },
@@ -66,7 +98,7 @@ export function useLLM() {
         );
       });
     },
-    []
+    [appendToBuffer]
   );
 
   const addProvider = useCallback(

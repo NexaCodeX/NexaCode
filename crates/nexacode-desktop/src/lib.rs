@@ -13,20 +13,22 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(llm_manager)
-        .invoke_handler(tauri::generate_handler![
-            greet,
-            llm::add_provider,
-            llm::remove_provider,
-            llm::set_active_provider,
-            llm::list_providers,
-            llm::get_active_provider,
-            llm::chat,
-            llm::chat_stream,
-            llm::list_models,
-            llm::load_providers,
-            llm::get_provider_config,
-            llm::update_provider
-        ])
+         .invoke_handler(tauri::generate_handler![
+             greet,
+             llm::add_provider,
+             llm::remove_provider,
+             llm::set_active_provider,
+             llm::list_providers,
+             llm::get_active_provider,
+             llm::chat,
+             llm::chat_stream,
+             llm::list_models,
+             llm::load_providers,
+             llm::get_provider_config,
+             llm::update_provider,
+             llm::load_chats,
+             llm::save_chats
+         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

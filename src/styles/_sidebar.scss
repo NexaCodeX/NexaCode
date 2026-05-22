@@ -11,16 +11,20 @@
   @include flex-column;
   height: 100%;
   border-right: 1px solid $border-subtle;
+  border-top-right-radius: $radius-card;
+  border-bottom-right-radius: $radius-card;
 }
 
 // Titlebar (drag region for overlay mode)
 .sidebar-titlebar {
+  width: 100%;
   height: $titlebar-height;
   padding-left: $traffic-light-width;
   @include flex-center;
   justify-content: flex-start;
   -webkit-app-region: drag;
   user-select: none;
+  flex-shrink: 0;
 }
 
 // Logo
@@ -188,6 +192,20 @@
   width: 100%;
 
   &:hover {
-    background: $bg-muted;
   }
-}
+ }
+
+ // Resize Handle
+ .resize-handle {
+  position: fixed;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 100;
+  transition: background 0.2s;
+
+  &:hover {
+    background: $accent-primary;
+  }
+ }

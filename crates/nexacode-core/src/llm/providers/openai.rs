@@ -57,9 +57,7 @@ impl OpenAIProvider {
         } else {
             OpenAIMessage {
                 role: msg.role.clone(),
-                content: OpenAIMessageContent::Text {
-                    text: msg.content.clone(),
-                },
+                content: OpenAIMessageContent::Simple(msg.content.clone()),
             }
         }
     }
@@ -74,6 +72,7 @@ struct OpenAIMessage {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 enum OpenAIMessageContent {
+    Simple(String),
     Text { text: String },
     Multi(Vec<OpenAIMessageContent>),
     ImageUrl { image_url: ImageUrl },
@@ -116,11 +115,15 @@ struct Choice {
 #[derive(Debug, Deserialize)]
 struct ResponseMessage {
     content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ResponseDelta {
     content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +166,9 @@ impl LLMProvider for OpenAIProvider {
         let url = format!("{}/chat/completions", self.get_base_url());
         let headers = self.build_headers();
 
+        log::info!("Stream request URL: {}", url);
+        log::info!("Stream request model: {}", options.model);
+
         let response = self
             .base
             .client
@@ -172,40 +178,70 @@ impl LLMProvider for OpenAIProvider {
             .send()
             .await?;
 
-        let stream = response.bytes_stream().map(move |chunk_result| {
-            let chunk = chunk_result?;
-            let text = String::from_utf8_lossy(&chunk);
+        log::info!("Stream response status: {}", response.status());
 
-            for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let data = &line[6..];
-                    if data == "[DONE]" {
-                        return Ok(StreamChunk {
-                            delta: String::new(),
-                            finish_reason: Some("stop".to_string()),
-                        });
-                    }
-
-                    if let Ok(response_data) = serde_json::from_str::<ChatResponseData>(data) {
-                        if let Some(choice) = response_data.choices.first() {
-                            let delta = choice
-                                .delta
-                                .as_ref()
-                                .and_then(|d| d.content.clone())
-                                .unwrap_or_default();
-                            return Ok(StreamChunk {
-                                delta,
-                                finish_reason: choice.finish_reason.clone(),
-                            });
+        let stream = response.bytes_stream().flat_map(|chunk_result| {
+            match chunk_result {
+                Ok(chunk) => {
+                    let text = String::from_utf8_lossy(&chunk);
+                    log::debug!("Stream chunk text: {}", text);
+                    
+                    let mut chunks = Vec::new();
+                    
+                    for line in text.lines() {
+                        let line = line.trim();
+                        if line.starts_with("data: ") {
+                            let data = &line[6..];
+                            if data == "[DONE]" {
+                                log::info!("Stream received [DONE]");
+                                chunks.push(Ok(StreamChunk {
+                                    delta: String::new(),
+                                    finish_reason: Some("stop".to_string()),
+                                }));
+                            } else if let Ok(response_data) = serde_json::from_str::<ChatResponseData>(data) {
+                                if let Some(choice) = response_data.choices.first() {
+                                    if let Some(d) = &choice.delta {
+                                        // Send reasoning content with special marker
+                                        if let Some(reasoning) = &d.reasoning_content {
+                                            if !reasoning.is_empty() {
+                                                chunks.push(Ok(StreamChunk {
+                                                    delta: format!("[THINKING]{}[/THINKING]", reasoning),
+                                                    finish_reason: None,
+                                                }));
+                                            }
+                                        }
+                                        // Send actual content
+                                        if let Some(content) = &d.content {
+                                            if !content.is_empty() {
+                                                chunks.push(Ok(StreamChunk {
+                                                    delta: content.clone(),
+                                                    finish_reason: None,
+                                                }));
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Handle finish reason
+                                    if choice.finish_reason.is_some() {
+                                        chunks.push(Ok(StreamChunk {
+                                            delta: String::new(),
+                                            finish_reason: choice.finish_reason.clone(),
+                                        }));
+                                    }
+                                }
+                            } else {
+                                log::warn!("Failed to parse stream data: {}", data);
+                            }
                         }
                     }
+                    
+                    futures::stream::iter(chunks).boxed()
+                }
+                Err(e) => {
+                    log::error!("Stream chunk error: {}", e);
+                    futures::stream::iter(vec![Err(anyhow::anyhow!("{}", e))]).boxed()
                 }
             }
-
-            Ok(StreamChunk {
-                delta: String::new(),
-                finish_reason: None,
-            })
         });
 
         Ok(Box::pin(stream))
@@ -241,14 +277,34 @@ impl LLMProvider for OpenAIProvider {
             .send()
             .await?;
 
-        let response_data: ChatResponseData = response.json().await?;
+        let status = response.status();
+        let response_text = response.text().await?;
+        
+        eprintln!("\n=== Chat Response ===");
+        eprintln!("Status: {}", status);
+        eprintln!("Body: {}\n", response_text);
+        
+        let response_data: ChatResponseData = serde_json::from_str(&response_text)?;
 
-        let content = response_data
+        let message = response_data
             .choices
             .first()
-            .and_then(|c| c.message.as_ref())
-            .and_then(|m| m.content.clone())
-            .unwrap_or_default();
+            .and_then(|c| c.message.as_ref());
+        
+        let mut content = String::new();
+        
+        if let Some(msg) = message {
+            // Add reasoning content (thinking) if present
+            if let Some(reasoning) = &msg.reasoning_content {
+                content.push_str("[THINKING]");
+                content.push_str(reasoning);
+                content.push_str("[/THINKING]\n\n");
+            }
+            // Add actual content
+            if let Some(text) = &msg.content {
+                content.push_str(text);
+            }
+        }
 
         let usage = response_data.usage.map(|u| Usage {
             prompt_tokens: u.prompt_tokens,

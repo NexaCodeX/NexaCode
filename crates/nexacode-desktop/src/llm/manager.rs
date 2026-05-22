@@ -4,6 +4,20 @@ use tokio::sync::RwLock;
 use nexacode_core::llm::{LLMClient, ProviderConfig};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Chat {
+    pub id: String,
+    pub title: String,
+    pub date: String,
+    pub messages: Vec<ChatMessage>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct SavedProvider {
     config: ProviderConfig,
@@ -15,18 +29,11 @@ struct Config {
     providers: HashMap<String, SavedProvider>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            providers: HashMap::new(),
-        }
-    }
-}
-
 pub struct LLMManager {
     clients: Arc<RwLock<HashMap<String, Arc<LLMClient>>>>,
     active_provider: Arc<RwLock<Option<String>>>,
     config_path: std::path::PathBuf,
+    chats_path: std::path::PathBuf,
 }
 
 impl LLMManager {
@@ -36,13 +43,16 @@ impl LLMManager {
             .join(".nexacode");
         
         let config_path = config_dir.join("config.toml");
+        let chats_path = config_dir.join("chats.json");
         
         log::info!("Config file path: {:?}", config_path);
+        log::info!("Chats file path: {:?}", chats_path);
         
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             active_provider: Arc::new(RwLock::new(None)),
             config_path,
+            chats_path,
         }
     }
 
@@ -73,6 +83,32 @@ impl LLMManager {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    pub async fn load_chats_from_disk(&self) -> Result<Vec<Chat>, anyhow::Error> {
+        if !self.chats_path.exists() {
+            log::info!("Chats file does not exist, returning empty list");
+            return Ok(Vec::new());
+        }
+
+        let content = tokio::fs::read_to_string(&self.chats_path).await?;
+        let chats: Vec<Chat> = serde_json::from_str(&content)?;
+
+        log::info!("Loaded {} chats from disk", chats.len());
+        Ok(chats)
+    }
+
+    pub async fn save_chats_to_disk(&self, chats: Vec<Chat>) -> Result<(), anyhow::Error> {
+        let content = serde_json::to_string_pretty(&chats)?;
+
+        if let Some(parent) = self.chats_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        tokio::fs::write(&self.chats_path, content).await?;
+        log::info!("Saved {} chats to {:?}", chats.len(), self.chats_path);
 
         Ok(())
     }
@@ -203,6 +239,7 @@ impl Clone for LLMManager {
             clients: Arc::clone(&self.clients),
             active_provider: Arc::clone(&self.active_provider),
             config_path: self.config_path.clone(),
+            chats_path: self.chats_path.clone(),
         }
     }
 }

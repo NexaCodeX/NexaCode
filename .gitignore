@@ -15,6 +15,7 @@ Thumbs.db
 
 # Rust / Cargo
 src-tauri/target/
+target/
 
 # Logs
 *.log

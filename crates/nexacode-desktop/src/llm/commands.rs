@@ -2,8 +2,7 @@ use tauri::{command, AppHandle, Emitter};
 use nexacode_core::llm::{ChatOptions, Message, ProviderConfig, ProviderType};
 use futures::StreamExt;
 
-use super::manager::LLMManager;
-
+use super::manager::{LLMManager, Chat};
 #[command]
 pub async fn load_providers(
     manager: tauri::State<'_, LLMManager>,
@@ -291,10 +290,31 @@ pub struct ModelInfo {
     pub description: Option<String>,
 }
 
-#[derive(Debug, serde::Serialize)]
-pub struct ProviderConfigResponse {
-    pub provider_type: String,
-    pub api_key: String,
-    pub base_url: Option<String>,
-    pub models: Vec<String>,
+ #[derive(Debug, serde::Serialize)]
+ pub struct ProviderConfigResponse {
+     pub provider_type: String,
+     pub api_key: String,
+     pub base_url: Option<String>,
+     pub models: Vec<String>,
+ }
+
+#[command]
+pub async fn load_chats(
+    manager: tauri::State<'_, LLMManager>,
+) -> Result<Vec<Chat>, String> {
+    manager
+        .load_chats_from_disk()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn save_chats(
+    manager: tauri::State<'_, LLMManager>,
+    chats: Vec<Chat>,
+) -> Result<(), String> {
+    manager
+        .save_chats_to_disk(chats)
+        .await
+        .map_err(|e| e.to_string())
 }

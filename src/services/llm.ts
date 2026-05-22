@@ -87,27 +87,42 @@ export class LLMService {
       maxTokens?: number;
     }
   ): Promise<void> {
+    console.log('=== LLMService.chatStream called ===');
+    console.log('messages:', messages);
+    console.log('model:', model);
+    console.log('options:', options);
+    
     const unlistenChunk = await listen<StreamChunk>('chat-chunk', (event) => {
+      console.log('Event chat-chunk:', event.payload);
       onChunk(event.payload);
     });
 
     const unlistenError = await listen<string>('chat-error', (event) => {
+      console.error('Event chat-error:', event.payload);
       onError(event.payload);
     });
 
     const unlistenEnd = await listen<void>('chat-end', () => {
+      console.log('Event chat-end received');
       onEnd();
       unlistenChunk();
       unlistenError();
       unlistenEnd();
     });
 
-    await invoke('chat_stream', {
-      messages,
-      model,
-      temperature: options?.temperature,
-      maxTokens: options?.maxTokens,
-    });
+    console.log('Invoking chat_stream command...');
+    try {
+      await invoke('chat_stream', {
+        messages,
+        model,
+        temperature: options?.temperature,
+        maxTokens: options?.maxTokens,
+      });
+      console.log('chat_stream command invoked successfully');
+    } catch (err) {
+      console.error('chat_stream invoke error:', err);
+      onError(String(err));
+    }
   }
 
   static async listModels(): Promise<ModelInfo[]> {
