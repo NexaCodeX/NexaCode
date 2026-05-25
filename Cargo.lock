@@ -437,8 +437,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -2119,14 +2121,21 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
+ "dirs 5.0.1",
  "futures",
+ "glob",
  "log",
+ "regex",
  "reqwest 0.12.28",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "uuid",
 ]
 
 [[package]]
@@ -2144,6 +2153,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-log",
  "tokio",
+ "tokio-util",
  "toml 0.8.2",
 ]
 
@@ -4144,6 +4154,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

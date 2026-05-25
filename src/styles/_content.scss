@@ -272,6 +272,22 @@
   }
 }
 
+.stop-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: $radius-pill;
+  background: $bg-muted;
+  border: 2px solid $border-strong;
+  @include flex-center;
+  cursor: pointer;
+  transition: all $transition-base;
+
+  &:hover {
+    background: $border-strong;
+    border-color: $text-tertiary;
+  }
+}
+
 // Options Container
 .options-container {
   padding: $spacing-standard 18px;

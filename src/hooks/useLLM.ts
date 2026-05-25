@@ -11,6 +11,9 @@ export function useLLM() {
   const bufferRef = useRef('');
   const rafIdRef = useRef<number | null>(null);
 
+  // Flag to track if stream was cancelled — ignore late-arriving chunks
+  const cancelledRef = useRef(false);
+
   // Flush buffer to state via requestAnimationFrame
   const flushBuffer = useCallback(() => {
     const content = bufferRef.current;
@@ -57,6 +60,7 @@ export function useLLM() {
       messages: ChatMessage[],
       model: string,
       options?: {
+        sessionId?: string;
         temperature?: number;
         maxTokens?: number;
       }
@@ -65,15 +69,20 @@ export function useLLM() {
       setError(null);
       setStreamingContent('');
       bufferRef.current = '';
+      cancelledRef.current = false;
 
       return new Promise((resolve) => {
         LLMService.chatStream(
           messages,
           model,
           (chunk: StreamChunk) => {
+            // Ignore chunks if stream was cancelled
+            if (cancelledRef.current) return;
             appendToBuffer(chunk.delta);
           },
           (err: string) => {
+            // Ignore errors if stream was cancelled
+            if (cancelledRef.current) return;
             // Flush any remaining buffer before handling error
             if (rafIdRef.current !== null) {
               cancelAnimationFrame(rafIdRef.current);
@@ -201,12 +210,29 @@ export function useLLM() {
     }
   }, []);
 
+  const cancelStream = useCallback(async (): Promise<void> => {
+    // Mark as cancelled immediately — this prevents late-arriving chunks from being processed
+    cancelledRef.current = true;
+
+    // Tell the backend to cancel the stream
+    await LLMService.cancelStream();
+
+    // Flush any remaining buffer that was already received
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    setStreamingContent(bufferRef.current);
+    setIsLoading(false);
+  }, []);
+
   return {
     isLoading,
     error,
     streamingContent,
     chat,
     chatStream,
+    cancelStream,
     addProvider,
     setActiveProvider,
     listProviders,

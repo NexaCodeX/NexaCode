@@ -1,8 +1,10 @@
 use tauri::{command, AppHandle, Emitter};
 use nexacode_core::llm::{ChatOptions, Message, ProviderConfig, ProviderType};
+use nexacode_core::session::{Session, SessionMeta, SessionLogger};
 use futures::StreamExt;
 
-use super::manager::{LLMManager, Chat};
+use super::manager::LLMManager;
+
 #[command]
 pub async fn load_providers(
     manager: tauri::State<'_, LLMManager>,
@@ -94,7 +96,7 @@ pub async fn chat(
 
     let messages: Vec<Message> = messages
         .into_iter()
-        .map(|m| Message::new(m.role.into(), m.content))
+        .map(|m| Message::new(m.role.into(), nexacode_core::llm::MessageContent::text(m.content)))
         .collect();
 
     let mut options = ChatOptions::new(model);
@@ -124,18 +126,30 @@ pub async fn chat_stream(
     manager: tauri::State<'_, LLMManager>,
     messages: Vec<ChatMessage>,
     model: String,
+    session_id: Option<String>,
     temperature: Option<f32>,
     max_tokens: Option<u32>,
 ) -> Result<(), String> {
+    log::info!("[chat_stream] Called with {} messages, model={}", messages.len(), model);
+
     let client = manager
         .get_active_client()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::error!("[chat_stream] Failed to get active client: {}", e);
+            e.to_string()
+        })?;
 
     let messages: Vec<Message> = messages
         .into_iter()
-        .map(|m| Message::new(m.role.into(), m.content))
+        .map(|m| Message::new(m.role.into(), nexacode_core::llm::MessageContent::text(m.content)))
         .collect();
+
+    // Log the chat request to session log if session_id provided
+    if let Some(ref sid) = session_id {
+        let logger = SessionLogger::new(sid);
+        logger.log_chat_request(&messages, &model).await;
+    }
 
     let mut options = ChatOptions::new(model).with_stream(true);
     if let Some(temp) = temperature {
@@ -150,22 +164,57 @@ pub async fn chat_stream(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Create a cancellation token for this stream
+    let cancel_token = manager.create_stream_cancellation().await;
+    let manager_clone = manager.inner().clone();
+
     tokio::spawn(async move {
         let mut stream = stream;
-        while let Some(chunk_result) = stream.next().await {
-            match chunk_result {
-                Ok(chunk) => {
-                    let _ = app.emit("chat-chunk", &chunk);
-                    if chunk.finish_reason.is_some() {
-                        break;
-                    }
+        loop {
+            // Fast-path: check if already cancelled before entering select
+            if cancel_token.is_cancelled() {
+                let _ = app.emit("chat-end", ());
+                manager_clone.clear_stream_cancellation().await;
+                return;
+            }
+
+            tokio::select! {
+                biased;
+
+                // Priority 1: Check cancellation first
+                _ = cancel_token.cancelled() => {
+                    // Stream was cancelled by user — stop immediately, no more events
+                    let _ = app.emit("chat-end", ());
+                    manager_clone.clear_stream_cancellation().await;
+                    return;
                 }
-                Err(e) => {
-                    let _ = app.emit("chat-error", e.to_string());
-                    break;
+
+                // Priority 2: Process stream chunks
+                chunk_result = stream.next() => {
+                    match chunk_result {
+                        Some(Ok(chunk)) => {
+                            // Double-check cancellation before emitting
+                            if cancel_token.is_cancelled() {
+                                let _ = app.emit("chat-end", ());
+                                manager_clone.clear_stream_cancellation().await;
+                                return;
+                            }
+                            let _ = app.emit("chat-chunk", &chunk);
+                            if chunk.finish_reason.is_some() {
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => {
+                            let _ = app.emit("chat-error", e.to_string());
+                            break;
+                        }
+                        None => break,
+                    }
                 }
             }
         }
+        // Stream completed naturally
+        manager_clone.clear_stream_cancellation().await;
         let _ = app.emit("chat-end", ());
     });
 
@@ -245,6 +294,65 @@ pub async fn update_provider(
         .map_err(|e| e.to_string())
 }
 
+#[command]
+pub async fn chat_stream_cancel(
+    manager: tauri::State<'_, LLMManager>,
+) -> Result<bool, String> {
+    let cancelled = manager.cancel_stream().await;
+    Ok(cancelled)
+}
+
+// ==========================================
+// Session commands
+// ==========================================
+
+#[command]
+pub async fn list_sessions(
+    manager: tauri::State<'_, LLMManager>,
+) -> Result<Vec<SessionMeta>, String> {
+    manager
+        .list_sessions()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn load_session(
+    manager: tauri::State<'_, LLMManager>,
+    session_id: String,
+) -> Result<Session, String> {
+    manager
+        .load_session(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn save_session(
+    manager: tauri::State<'_, LLMManager>,
+    session: Session,
+) -> Result<(), String> {
+    manager
+        .save_session(&session)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn delete_session(
+    manager: tauri::State<'_, LLMManager>,
+    session_id: String,
+) -> Result<(), String> {
+    manager
+        .delete_session(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ==========================================
+// Shared types for Tauri commands
+// ==========================================
+
 #[derive(Debug, serde::Deserialize)]
 pub struct ChatMessage {
     pub role: MessageRole,
@@ -290,31 +398,10 @@ pub struct ModelInfo {
     pub description: Option<String>,
 }
 
- #[derive(Debug, serde::Serialize)]
- pub struct ProviderConfigResponse {
-     pub provider_type: String,
-     pub api_key: String,
-     pub base_url: Option<String>,
-     pub models: Vec<String>,
- }
-
-#[command]
-pub async fn load_chats(
-    manager: tauri::State<'_, LLMManager>,
-) -> Result<Vec<Chat>, String> {
-    manager
-        .load_chats_from_disk()
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[command]
-pub async fn save_chats(
-    manager: tauri::State<'_, LLMManager>,
-    chats: Vec<Chat>,
-) -> Result<(), String> {
-    manager
-        .save_chats_to_disk(chats)
-        .await
-        .map_err(|e| e.to_string())
+#[derive(Debug, serde::Serialize)]
+pub struct ProviderConfigResponse {
+    pub provider_type: String,
+    pub api_key: String,
+    pub base_url: Option<String>,
+    pub models: Vec<String>,
 }

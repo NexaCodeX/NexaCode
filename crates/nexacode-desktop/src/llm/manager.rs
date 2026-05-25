@@ -1,22 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use nexacode_core::llm::{LLMClient, ProviderConfig};
+use nexacode_core::session::SessionStorage;
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Chat {
-    pub id: String,
-    pub title: String,
-    pub date: String,
-    pub messages: Vec<ChatMessage>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SavedProvider {
@@ -33,7 +21,9 @@ pub struct LLMManager {
     clients: Arc<RwLock<HashMap<String, Arc<LLMClient>>>>,
     active_provider: Arc<RwLock<Option<String>>>,
     config_path: std::path::PathBuf,
-    chats_path: std::path::PathBuf,
+    session_storage: SessionStorage,
+    /// Cancellation token for the currently active stream
+    stream_cancellation: Arc<RwLock<Option<CancellationToken>>>,
 }
 
 impl LLMManager {
@@ -41,18 +31,18 @@ impl LLMManager {
         let config_dir = dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join(".nexacode");
-        
+
         let config_path = config_dir.join("config.toml");
-        let chats_path = config_dir.join("chats.json");
-        
+        let session_storage = SessionStorage::new();
+
         log::info!("Config file path: {:?}", config_path);
-        log::info!("Chats file path: {:?}", chats_path);
-        
+
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             active_provider: Arc::new(RwLock::new(None)),
             config_path,
-            chats_path,
+            session_storage,
+            stream_cancellation: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -72,7 +62,7 @@ impl LLMManager {
             match LLMClient::new(saved_provider.config) {
                 Ok(client) => {
                     clients.insert(name.clone(), Arc::new(client));
-                    
+
                     if saved_provider.is_active {
                         *active = Some(name.clone());
                     }
@@ -87,38 +77,67 @@ impl LLMManager {
         Ok(())
     }
 
-    pub async fn load_chats_from_disk(&self) -> Result<Vec<Chat>, anyhow::Error> {
-        if !self.chats_path.exists() {
-            log::info!("Chats file does not exist, returning empty list");
-            return Ok(Vec::new());
-        }
+    // ==========================================
+    // Stream cancellation
+    // ==========================================
 
-        let content = tokio::fs::read_to_string(&self.chats_path).await?;
-        let chats: Vec<Chat> = serde_json::from_str(&content)?;
-
-        log::info!("Loaded {} chats from disk", chats.len());
-        Ok(chats)
+    /// Create a new cancellation token for a stream and store it.
+    /// Returns the token so the stream handler can use it.
+    pub async fn create_stream_cancellation(&self) -> CancellationToken {
+        let token = CancellationToken::new();
+        let mut stream_cancel = self.stream_cancellation.write().await;
+        *stream_cancel = Some(token.clone());
+        token
     }
 
-    pub async fn save_chats_to_disk(&self, chats: Vec<Chat>) -> Result<(), anyhow::Error> {
-        let content = serde_json::to_string_pretty(&chats)?;
-
-        if let Some(parent) = self.chats_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+    /// Cancel the currently active stream, if any.
+    /// Returns true if a stream was cancelled, false if no active stream.
+    pub async fn cancel_stream(&self) -> bool {
+        let mut stream_cancel = self.stream_cancellation.write().await;
+        if let Some(token) = stream_cancel.take() {
+            token.cancel();
+            true
+        } else {
+            false
         }
-
-        tokio::fs::write(&self.chats_path, content).await?;
-        log::info!("Saved {} chats to {:?}", chats.len(), self.chats_path);
-
-        Ok(())
     }
+
+    /// Clear the stream cancellation token (called when stream ends naturally)
+    pub async fn clear_stream_cancellation(&self) {
+        let mut stream_cancel = self.stream_cancellation.write().await;
+        *stream_cancel = None;
+    }
+
+    // ==========================================
+    // Session management (delegated to SessionStorage)
+    // ==========================================
+
+    pub async fn list_sessions(&self) -> Result<Vec<nexacode_core::session::SessionMeta>, anyhow::Error> {
+        self.session_storage.list_sessions().await
+    }
+
+    pub async fn load_session(&self, session_id: &str) -> Result<nexacode_core::session::Session, anyhow::Error> {
+        self.session_storage.load_session(session_id).await
+    }
+
+    pub async fn save_session(&self, session: &nexacode_core::session::Session) -> Result<(), anyhow::Error> {
+        self.session_storage.save_session(session).await
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> Result<(), anyhow::Error> {
+        self.session_storage.delete_session(session_id).await
+    }
+
+    // ==========================================
+    // Provider management
+    // ==========================================
 
     async fn save_to_disk(&self) -> Result<(), anyhow::Error> {
         let clients = self.clients.read().await;
         let active = self.active_provider.read().await;
 
         let mut providers = HashMap::new();
-        
+
         for (name, client) in clients.iter() {
             providers.insert(name.clone(), SavedProvider {
                 config: client.get_config().clone(),
@@ -143,32 +162,32 @@ impl LLMManager {
         let client = Arc::new(LLMClient::new(config)?);
         let mut clients = self.clients.write().await;
         clients.insert(name.clone(), client);
-        
+
         let mut active = self.active_provider.write().await;
         if active.is_none() {
             *active = Some(name);
         }
         drop(active);
         drop(clients);
-        
+
         self.save_to_disk().await?;
-        
+
         Ok(())
     }
 
     pub async fn remove_provider(&self, name: &str) -> Result<(), anyhow::Error> {
         let mut clients = self.clients.write().await;
         clients.remove(name);
-        
+
         let mut active = self.active_provider.write().await;
         if active.as_ref().map(|n| n == name).unwrap_or(false) {
             *active = clients.keys().next().cloned();
         }
         drop(active);
         drop(clients);
-        
+
         self.save_to_disk().await?;
-        
+
         Ok(())
     }
 
@@ -177,21 +196,21 @@ impl LLMManager {
         if !clients.contains_key(&name) {
             return Err(anyhow::anyhow!("Provider '{}' not found", name));
         }
-        
+
         let mut active = self.active_provider.write().await;
         *active = Some(name);
         drop(active);
         drop(clients);
-        
+
         self.save_to_disk().await?;
-        
+
         Ok(())
     }
 
     pub async fn get_active_client(&self) -> Result<Arc<LLMClient>, anyhow::Error> {
         let active = self.active_provider.read().await;
         let name = active.as_ref().ok_or_else(|| anyhow::anyhow!("No active provider"))?;
-        
+
         let clients = self.clients.read().await;
         clients.get(name).cloned().ok_or_else(|| anyhow::anyhow!("Active provider not found"))
     }
@@ -213,16 +232,16 @@ impl LLMManager {
     pub async fn update_provider(&self, name: String, config: ProviderConfig) -> Result<(), anyhow::Error> {
         let client = Arc::new(LLMClient::new(config)?);
         let mut clients = self.clients.write().await;
-        
+
         if !clients.contains_key(&name) {
             return Err(anyhow::anyhow!("Provider '{}' not found", name));
         }
-        
+
         clients.insert(name, client);
         drop(clients);
-        
+
         self.save_to_disk().await?;
-        
+
         Ok(())
     }
 }
@@ -239,7 +258,8 @@ impl Clone for LLMManager {
             clients: Arc::clone(&self.clients),
             active_provider: Arc::clone(&self.active_provider),
             config_path: self.config_path.clone(),
-            chats_path: self.chats_path.clone(),
+            session_storage: SessionStorage::new(),
+            stream_cancellation: Arc::clone(&self.stream_cancellation),
         }
     }
 }

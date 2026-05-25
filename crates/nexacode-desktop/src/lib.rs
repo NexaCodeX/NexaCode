@@ -1,6 +1,8 @@
 use tauri::{command, Manager};
 
+mod agent;
 mod llm;
+mod tools;
 
 #[command]
 fn greet(name: &str) -> String {
@@ -10,25 +12,41 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let llm_manager = llm::LLMManager::new();
+    let tool_state = tools::ToolState::default();
 
     tauri::Builder::default()
         .manage(llm_manager)
-         .invoke_handler(tauri::generate_handler![
-             greet,
-             llm::add_provider,
-             llm::remove_provider,
-             llm::set_active_provider,
-             llm::list_providers,
-             llm::get_active_provider,
-             llm::chat,
-             llm::chat_stream,
-             llm::list_models,
-             llm::load_providers,
-             llm::get_provider_config,
-             llm::update_provider,
-             llm::load_chats,
-             llm::save_chats
-         ])
+        .manage(tool_state)
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            // LLM commands
+            llm::add_provider,
+            llm::remove_provider,
+            llm::set_active_provider,
+            llm::list_providers,
+            llm::get_active_provider,
+            llm::chat,
+            llm::chat_stream,
+            llm::chat_stream_cancel,
+            llm::list_models,
+            llm::load_providers,
+            llm::get_provider_config,
+            llm::update_provider,
+            // Session commands
+            llm::list_sessions,
+            llm::load_session,
+            llm::save_session,
+            llm::delete_session,
+            // Tool commands
+            tools::tool_list,
+            tools::tool_execute,
+            tools::tool_requires_confirmation,
+            tools::tool_set_working_dir,
+            tools::tool_get_working_dir,
+            // Agent commands
+            agent::agent_run,
+            agent::agent_step
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

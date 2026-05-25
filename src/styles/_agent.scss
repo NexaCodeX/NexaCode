@@ -1,0 +1,501 @@
+@use 'variables' as *;
+
+// ==========================================
+// Agent Step Styles
+// ==========================================
+
+.agent-step {
+  display: flex;
+  gap: $spacing-standard;
+  margin-bottom: $spacing-md;
+  position: relative;
+
+  &.running {
+    .agent-step-indicator {
+      .agent-step-number {
+        background: $accent-primary;
+        color: $white;
+        animation: agent-step-pulse 1.5s ease-in-out infinite;
+      }
+    }
+  }
+
+  &.error {
+    .agent-step-indicator {
+      .agent-step-number {
+        background: rgba(235, 87, 87, 0.15);
+        color: $accent-coral;
+      }
+    }
+  }
+}
+
+@keyframes agent-step-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.agent-step-indicator {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+
+  .agent-step-number {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: $font-weight-semibold;
+    background: $bg-muted;
+    color: $text-tertiary;
+    flex-shrink: 0;
+  }
+}
+
+.agent-step-content {
+  flex: 1;
+  min-width: 0;
+}
+
+// ==========================================
+// Agent Thinking Styles
+// ==========================================
+
+.agent-thinking {
+  margin-bottom: $spacing-sm;
+  border-radius: $radius-sm;
+  overflow: hidden;
+
+  &.open {
+    background: $bg-muted;
+    border-radius: $radius-sm;
+  }
+}
+
+.agent-thinking-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 0;
+  transition: opacity 0.2s;
+
+  span {
+    font-size: 12px;
+    font-weight: 500;
+    color: $text-tertiary;
+  }
+}
+
+.agent-thinking-body {
+  padding: 0 10px 10px 10px;
+  font-size: 13px;
+  color: $text-secondary;
+  line-height: 1.5;
+
+  .markdown-content {
+    font-size: 13px;
+  }
+}
+
+// ==========================================
+// Tool Call View Styles
+// ==========================================
+
+.tool-call-view {
+  border: 1px solid $border-subtle;
+  border-radius: $radius-sm;
+  overflow: hidden;
+  background: $bg-card;
+}
+
+.tool-call-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: $bg-elevated;
+  border: none;
+  cursor: pointer;
+  transition: background $transition-base;
+
+  &:hover {
+    background: $bg-muted;
+  }
+
+  &.expanded {
+    border-bottom: 1px solid $border-subtle;
+  }
+}
+
+.tool-call-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tool-call-label {
+  font-size: 13px;
+  font-weight: $font-weight-medium;
+  flex-shrink: 0;
+}
+
+.tool-call-summary {
+  font-size: 12px;
+  color: $text-tertiary;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-details {
+  padding: $spacing-standard;
+}
+
+.tool-call-section {
+  margin-bottom: $spacing-sm;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.tool-call-section-label {
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  color: $text-tertiary;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.tool-call-args,
+.tool-call-result {
+  margin: 0;
+  padding: 10px 12px;
+  background: #f6f8fa;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  line-height: 1.5;
+  color: $text-primary;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.tool-call-result.error {
+  background: rgba(235, 87, 87, 0.08);
+  border: 1px solid rgba(235, 87, 87, 0.2);
+  color: $accent-coral;
+}
+
+// Spinner for running tools
+.tool-call-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  position: relative;
+  animation: tool-spin 1s linear infinite;
+
+  .tool-call-spinner-inner {
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    animation: tool-spin 0.8s linear infinite;
+  }
+}
+
+@keyframes tool-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+// ==========================================
+// Diff Preview Styles
+// ==========================================
+
+.diff-preview {
+  border: 1px solid $border-subtle;
+  border-radius: $radius-sm;
+  overflow: hidden;
+  background: $bg-card;
+}
+
+.diff-preview-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: $bg-elevated;
+  border: none;
+  cursor: pointer;
+  transition: background $transition-base;
+
+  &:hover {
+    background: $bg-muted;
+  }
+
+  &.expanded {
+    border-bottom: 1px solid $border-subtle;
+  }
+}
+
+.diff-preview-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.diff-preview-filename {
+  font-size: 13px;
+  font-weight: $font-weight-medium;
+  color: $text-primary;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+}
+
+.diff-preview-stats {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-weight: $font-weight-semibold;
+}
+
+.diff-stat-added {
+  color: #22863a;
+}
+
+.diff-stat-removed {
+  color: #cb2431;
+}
+
+.diff-applied-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(61, 138, 90, 0.12);
+  color: $accent-primary;
+  border-radius: $radius-pill;
+  font-weight: $font-weight-medium;
+}
+
+.diff-preview-content {
+  overflow-x: auto;
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  line-height: 1.6;
+}
+
+.diff-line {
+  &-number {
+    width: 40px;
+    min-width: 40px;
+    padding: 0 8px;
+    text-align: right;
+    color: $text-tertiary;
+    background: $bg-elevated;
+    user-select: none;
+    border-right: 1px solid $border-subtle;
+    vertical-align: top;
+  }
+
+  &-prefix {
+    width: 20px;
+    min-width: 20px;
+    padding: 0 4px;
+    text-align: center;
+    font-weight: $font-weight-semibold;
+    user-select: none;
+    vertical-align: top;
+  }
+
+  &-content {
+    padding: 0 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    vertical-align: top;
+  }
+}
+
+.diff-line-context {
+  .diff-line-prefix {
+    color: $text-tertiary;
+  }
+}
+
+.diff-line-added {
+  background: rgba(46, 160, 67, 0.08);
+
+  .diff-line-prefix {
+    color: #22863a;
+  }
+
+  .diff-line-content {
+    color: #22863a;
+  }
+}
+
+.diff-line-removed {
+  background: rgba(203, 36, 49, 0.08);
+
+  .diff-line-prefix {
+    color: #cb2431;
+  }
+
+  .diff-line-content {
+    color: #cb2431;
+  }
+}
+
+// Diff action buttons
+.diff-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+  padding: 8px 12px;
+  border-top: 1px solid $border-subtle;
+  background: $bg-elevated;
+}
+
+.diff-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: $font-weight-medium;
+  cursor: pointer;
+  transition: all $transition-base;
+  border: 1px solid $border-strong;
+
+  &-reject {
+    background: $bg-card;
+    color: $accent-coral;
+    border-color: rgba(235, 87, 87, 0.3);
+
+    &:hover {
+      background: rgba(235, 87, 87, 0.08);
+    }
+  }
+
+  &-accept {
+    background: $accent-primary;
+    color: $white;
+    border-color: $accent-primary;
+
+    &:hover {
+      opacity: 0.9;
+    }
+  }
+}
+
+// ==========================================
+// Tool result only (no tool call)
+// ==========================================
+
+.agent-tool-result-only {
+  border: 1px solid $border-subtle;
+  border-radius: $radius-sm;
+  overflow: hidden;
+  background: $bg-card;
+
+  &.error {
+    border-color: rgba(235, 87, 87, 0.3);
+
+    pre {
+      color: $accent-coral;
+      background: rgba(235, 87, 87, 0.05);
+    }
+  }
+
+  pre {
+    margin: 0;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: $text-primary;
+    background: $bg-elevated;
+  }
+}
+
+// ==========================================
+// Agent Status Bar (in assistant message)
+// ==========================================
+
+.agent-steps-container {
+  margin: 8px 0;
+}
+
+.agent-completed-response {
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1px solid $border-subtle;
+}
+
+// ==========================================
+// Agent Running Indicator
+// ==========================================
+
+.agent-running-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: $text-tertiary;
+  font-size: 13px;
+
+  .agent-running-dots {
+    display: flex;
+    gap: 3px;
+
+    span {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: $accent-primary;
+      animation: agent-dot-bounce 1.2s infinite ease-in-out both;
+
+      &:nth-child(1) { animation-delay: -0.24s; }
+      &:nth-child(2) { animation-delay: -0.12s; }
+      &:nth-child(3) { animation-delay: 0s; }
+    }
+  }
+}
+
+@keyframes agent-dot-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.5);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

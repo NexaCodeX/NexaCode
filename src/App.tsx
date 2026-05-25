@@ -1,28 +1,115 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './styles/main.scss';
 import logo from './assets/logo.png';
 import { LucideIcon } from './components/LucideIcon';
 import { Settings } from './components/Settings';
 import { MarkdownRenderer } from './components/MarkdownRenderer';
+import { AgentStepView } from './components/AgentStep';
 import { useLLM } from './hooks/useLLM';
+import { useAgent } from './hooks/useAgent';
 import type { ChatMessage } from './services/llm';
+import type { AgentStep } from './hooks/useAgent';
 
+// Types matching Rust backend Session/SessionMeta
+interface SessionMeta {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  message_count: number;
+}
+
+interface Session {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  messages: SessionMessage[];
+}
+
+/** A message as stored in the session JSON — steps use camelCase (matching Rust #[serde(rename_all = "camelCase")]) */
+interface SessionMessage {
+  role: string;
+  content: string;
+  steps?: SessionStepData[];
+}
+
+/** Step data in the session JSON (camelCase from Rust) */
+interface SessionStepData {
+  id: string;
+  thinking?: string;
+  toolCall?: {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+    requiresConfirmation: boolean;
+  };
+  toolResult?: {
+    toolCallId: string;
+    name: string;
+    output: string;
+    isError: boolean;
+  };
+  status: string;
+}
+
+/** Chat mode: Build = Agent loop with tools, Chat = simple streaming */
+type ChatMode = 'build' | 'chat';
+
+/** The runtime message type used in the UI */
 interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Agent execution steps (only on assistant messages in Build mode) */
+  steps?: AgentStep[];
 }
 
-interface ChatItem {
-  id: string;
-  title: string;
-  date: string;
-  messages: Message[];
+/** Convert an AgentStep (runtime) to SessionStepData (for saving) */
+function stepToSessionData(s: AgentStep): SessionStepData {
+  return {
+    id: s.id,
+    thinking: s.thinking,
+    toolCall: s.toolCall ? {
+      id: s.toolCall.id,
+      name: s.toolCall.name,
+      arguments: s.toolCall.arguments,
+      requiresConfirmation: s.toolCall.requires_confirmation,
+    } : undefined,
+    toolResult: s.toolResult ? {
+      toolCallId: s.toolResult.tool_call_id,
+      name: s.toolResult.name,
+      output: s.toolResult.output,
+      isError: s.toolResult.is_error,
+    } : undefined,
+    status: s.status,
+  };
+}
+
+/** Convert a SessionStepData (from JSON) back to AgentStep (runtime) */
+function sessionDataToStep(s: SessionStepData): AgentStep {
+  return {
+    id: s.id,
+    thinking: s.thinking,
+    toolCall: s.toolCall ? {
+      id: s.toolCall.id,
+      name: s.toolCall.name,
+      arguments: s.toolCall.arguments,
+      requires_confirmation: s.toolCall.requiresConfirmation,
+    } : undefined,
+    toolResult: s.toolResult ? {
+      tool_call_id: s.toolResult.toolCallId,
+      name: s.toolResult.name,
+      output: s.toolResult.output,
+      is_error: s.toolResult.isError,
+    } : undefined,
+    status: s.status as AgentStep['status'],
+  };
 }
 
 function App() {
-  const [chats, setChats] = useState<ChatItem[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [model, setModel] = useState('');
@@ -32,32 +119,102 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>('build');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // 从后端加载聊天记录
+  // Debounce timer for saving session
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const {
+    isLoading,
+    error,
+    streamingContent,
+    chatStream,
+    cancelStream,
+    listProviders,
+    getActiveProvider,
+    getProviderConfig,
+    clearError,
+  } = useLLM();
+
+  const agent = useAgent();
+
+  // Combined loading state
+  const isAnyLoading = isLoading || agent.isRunning;
+
+  // ==========================================
+  // Session persistence
+  // ==========================================
+
+  // Load session list on mount
   useEffect(() => {
-    const loadChats = async () => {
-      try {
-        const loadedChats = await invoke<ChatItem[]>('load_chats');
-        setChats(loadedChats);
-      } catch (e) {
-        console.error('Failed to load chats from disk:', e);
-      }
-    };
-    loadChats();
+    refreshSessions();
   }, []);
 
-  // 当 chats 改变时保存到后端
-  useEffect(() => {
-    const saveChats = async () => {
-      try {
-        await invoke('save_chats', { chats });
-      } catch (e) {
-        console.error('Failed to save chats to disk:', e);
+  // Refresh session list from backend
+  const refreshSessions = async () => {
+    try {
+      const list = await invoke<SessionMeta[]>('list_sessions');
+      setSessions(list);
+    } catch (e) {
+      console.error('Failed to load sessions:', e);
+    }
+  };
+
+  // Load a session's messages from backend
+  const loadSessionMessages = async (sessionId: string) => {
+    try {
+      const session = await invoke<Session>('load_session', { sessionId });
+      const loaded: Message[] = session.messages.map(m => ({
+        role: m.role as Message['role'],
+        content: m.content,
+        steps: m.steps?.map(sessionDataToStep),
+      }));
+      setMessages(loaded);
+
+      // If any message has steps, this was a Build mode session
+      const hasSteps = loaded.some(m => m.steps && m.steps.length > 0);
+      if (hasSteps) {
+        setChatMode('build');
       }
-    };
-    saveChats();
-  }, [chats]);
+
+      agent.reset();
+    } catch (e) {
+      console.error('Failed to load session:', e);
+    }
+  };
+
+  // Save current session to disk (with debounce)
+  const saveCurrentSession = useCallback((sessionId: string, sessionMessages: Message[], title?: string) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const now = Date.now();
+        const session: Session = {
+          id: sessionId,
+          title: title || sessionMessages[0]?.content.slice(0, 30) + (sessionMessages[0]?.content.length > 30 ? '...' : '') || 'New Chat',
+          created_at: now,
+          updated_at: now,
+          messages: sessionMessages.map(m => ({
+            role: m.role,
+            content: m.content,
+            steps: m.steps?.map(stepToSessionData),
+          })),
+        };
+        await invoke('save_session', { session });
+        await refreshSessions();
+      } catch (e) {
+        console.error('Failed to save session:', e);
+      }
+    }, 500); // 500ms debounce
+  }, []);
+
+  // ==========================================
+  // Sidebar resize
+  // ==========================================
+
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
@@ -66,7 +223,6 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-      // 限制最小宽度 200px，最大宽度 400px
       const newWidth = Math.max(200, Math.min(400, e.clientX));
       setSidebarWidth(newWidth);
     };
@@ -90,73 +246,69 @@ function App() {
     };
   }, [isResizing]);
 
-  const {
-    isLoading,
-    error,
-    streamingContent,
-    chatStream,
-    listProviders,
-    getActiveProvider,
-    getProviderConfig,
-    clearError,
-  } = useLLM();
-
-  useEffect(() => {
-    loadProviders();
-  }, []);
-
-  // 页面加载后，如果有激活的对话 ID，加载对应消息
-  useEffect(() => {
-    if (activeChatId && chats.length > 0) {
-      const activeChat = chats.find(c => c.id === activeChatId);
-      if (activeChat) {
-        setMessages(activeChat.messages);
-      }
-    }
-  }, [activeChatId, chats]);
-
-  // 自动保存对话列表到 localStorage
-  useEffect(() => {
-    localStorage.setItem('nexacode-chats', JSON.stringify(chats));
-  }, [chats]);
-
-  // 自动保存当前激活的对话 ID 到 localStorage
-  useEffect(() => {
-    localStorage.setItem('nexacode-active-chat', JSON.stringify(activeChatId));
-  }, [activeChatId]);
+  // ==========================================
+  // Auto-scroll & streaming completion
+  // ==========================================
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, agent.steps]);
+
+  // When streaming completes (Chat mode), add assistant message to messages and save
   useEffect(() => {
     if (streamingContent && !isLoading) {
       setMessages((prev) => {
         const lastMessage = prev[prev.length - 1];
-        
+
         const newMessage: Message = {
           role: 'assistant',
           content: streamingContent,
         };
-        
+
         let newMessages: Message[];
         if (lastMessage?.role === 'assistant') {
           newMessages = [...prev.slice(0, -1), newMessage];
         } else {
           newMessages = [...prev, newMessage];
         }
-        
-        if (activeChatId) {
-          setChats((prevChats) =>
-            prevChats.map((chat) =>
-              chat.id === activeChatId ? { ...chat, messages: newMessages } : chat
-            )
-          );
+
+        if (activeSessionId) {
+          saveCurrentSession(activeSessionId, newMessages);
         }
-        
+
         return newMessages;
       });
     }
-  }, [streamingContent, isLoading, activeChatId]);
+  }, [streamingContent, isLoading, activeSessionId, saveCurrentSession]);
+
+  // When agent completes, create a single assistant message with steps + final content
+  useEffect(() => {
+    if (!agent.isRunning && agent.finalResponse && activeSessionId) {
+      const content = agent.finalResponse.content;
+      const agentSteps = agent.steps;
+
+      setMessages((prev) => {
+        // Build the assistant message with embedded steps
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content,
+          steps: agentSteps.length > 0 ? agentSteps : undefined,
+        };
+
+        const newMessages = [...prev, assistantMsg];
+        saveCurrentSession(activeSessionId, newMessages);
+        return newMessages;
+      });
+    }
+  }, [agent.isRunning, agent.finalResponse, activeSessionId, saveCurrentSession, agent.steps]);
+
+  // ==========================================
+  // Provider loading
+  // ==========================================
+
+  useEffect(() => {
+    loadProviders();
+  }, []);
 
   const loadProviders = async () => {
     const providerList = await listProviders();
@@ -174,6 +326,10 @@ function App() {
     }
   };
 
+  // ==========================================
+  // Chat actions
+  // ==========================================
+
   const handleTextareaInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
     const textarea = e.currentTarget;
     textarea.style.height = 'auto';
@@ -181,59 +337,78 @@ function App() {
   };
 
   const handleSendMessage = async () => {
-    console.log('=== handleSendMessage called ===');
-    console.log('inputValue:', inputValue);
-    console.log('isLoading:', isLoading);
-    console.log('model:', model);
-    console.log('messages count:', messages.length);
-    
-    if (!inputValue.trim() || isLoading) {
-      console.log('Early return: no input or already loading');
+    if (!inputValue.trim() || isAnyLoading) return;
+
+    if (!model) {
+      console.error('[App] No model selected');
       return;
     }
 
+    console.log('[App] handleSendMessage called, chatMode:', chatMode, 'model:', model);
+
     const userMessage: Message = { role: 'user', content: inputValue.trim() };
     const newMessages = [...messages, userMessage];
-    console.log('New messages:', newMessages);
-    
+
     setMessages(newMessages);
     setInputValue('');
 
-    if (!activeChatId) {
-      const newChatId = Date.now().toString();
-      const newChat: ChatItem = {
-        id: newChatId,
-        title: inputValue.trim().slice(0, 30) + (inputValue.trim().length > 30 ? '...' : ''),
-        date: 'Today',
-        messages: [userMessage],
-      };
-      console.log('Creating new chat:', newChat);
-      setChats((prev) => [newChat, ...prev]);
-      setActiveChatId(newChatId);
-    } else {
-      console.log('Updating existing chat:', activeChatId);
-      setChats((prev) =>
-        prev.map((chat) =>
-          chat.id === activeChatId ? { ...chat, messages: newMessages } : chat
-        )
-      );
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      sessionId = Date.now().toString();
+      setActiveSessionId(sessionId);
     }
 
-    const apiMessages: ChatMessage[] = newMessages.map(m => ({
-      role: m.role,
-      content: m.content,
-    }));
+    // Save session with user message
+    const title = messages.length === 0
+      ? inputValue.trim().slice(0, 30) + (inputValue.trim().length > 30 ? '...' : '')
+      : undefined;
+    saveCurrentSession(sessionId, newMessages, title);
 
-    console.log('Calling chatStream with model:', model);
-    try {
-      await chatStream(apiMessages, model);
-      console.log('chatStream completed');
-    } catch (err) {
-      console.error('chatStream error:', err);
+    if (chatMode === 'build') {
+      // Agent mode — run the agent loop
+      console.log('[App] Running agent in build mode...');
+      try {
+        await agent.run({
+          session_id: sessionId,
+          message: inputValue.trim(),
+          model,
+        });
+        console.log('[App] Agent run completed');
+      } catch (err) {
+        console.error('[App] agent_run error:', err);
+      }
+    } else {
+      // Chat mode — simple streaming
+      console.log('[App] Running chat stream...');
+      const apiMessages: ChatMessage[] = newMessages.map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      try {
+        await chatStream(apiMessages, model, { sessionId });
+        console.log('[App] Chat stream completed');
+      } catch (err) {
+        console.error('[App] chatStream error:', err);
+      }
+    }
+  };
+
+  const handleStop = () => {
+    if (agent.isRunning) {
+      agent.stop();
+    }
+    if (isLoading) {
+      cancelStream();
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // If the user is composing text with an IME (e.g. Chinese pinyin input),
+    // ignore Enter so the IME can handle candidate selection instead of
+    // accidentally sending the message.
+    if (e.nativeEvent.isComposing) return;
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -241,15 +416,27 @@ function App() {
   };
 
   const handleNewChat = () => {
-    setActiveChatId(null);
+    setActiveSessionId(null);
     setMessages([]);
+    agent.reset();
   };
 
-  const handleSelectChat = (chatId: string) => {
-    const chat = chats.find((c) => c.id === chatId);
-    if (chat) {
-      setActiveChatId(chatId);
-      setMessages(chat.messages || []);
+  const handleSelectSession = async (sessionId: string) => {
+    setActiveSessionId(sessionId);
+    await loadSessionMessages(sessionId);
+  };
+
+  const handleDeleteSession = async (e: React.MouseEvent, sessionId: string) => {
+    e.stopPropagation();
+    try {
+      await invoke('delete_session', { sessionId });
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+      await refreshSessions();
+    } catch (err) {
+      console.error('Failed to delete session:', err);
     }
   };
 
@@ -262,22 +449,110 @@ function App() {
     }
   };
 
+  // Format timestamp to relative date
+  const formatDate = (ts: number): string => {
+    const now = Date.now();
+    const diff = now - ts;
+    if (diff < 86400000) return 'Today';
+    if (diff < 172800000) return 'Yesterday';
+    const d = new Date(ts);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
+  // ==========================================
+  // Shared: model selector + send/stop buttons
+  // ==========================================
+
+  const renderInputActions = () => (
+    <div className="right-actions">
+      {showCustomModel ? (
+        <div className="custom-model-input">
+          <input
+            type="text"
+            value={customModel}
+            onChange={(e) => setCustomModel(e.target.value)}
+            placeholder="model-name"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddCustomModel();
+              }
+              if (e.key === 'Escape') {
+                setShowCustomModel(false);
+                setCustomModel('');
+              }
+            }}
+          />
+          <button onClick={handleAddCustomModel} className="add-model-btn">
+            <LucideIcon name="check" size={16} color="var(--accent-primary)" />
+          </button>
+          <button onClick={() => { setShowCustomModel(false); setCustomModel(''); }} className="cancel-model-btn">
+            <LucideIcon name="x" size={16} color="var(--text-tertiary)" />
+          </button>
+        </div>
+      ) : (
+        <>
+          <select
+            className="model-select"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {availableModels.length > 0 ? (
+              availableModels.map((modelId) => (
+                <option key={modelId} value={modelId}>{modelId}</option>
+              ))
+            ) : (
+              <>
+                <option value="gpt-4">GPT-4</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gpt-3.5-turbo">GPT-3.5</option>
+                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+              </>
+            )}
+          </select>
+          <button
+            onClick={() => setShowCustomModel(true)}
+            className="custom-model-btn"
+            title="Add custom model"
+          >
+            <LucideIcon name="plus" size={16} color="var(--text-secondary)" />
+          </button>
+        </>
+      )}
+      {isAnyLoading ? (
+        <button className="stop-btn" onClick={handleStop}>
+          <LucideIcon name="square" size={16} color="#FFFFFF" />
+        </button>
+      ) : (
+        <button
+          className="send-btn"
+          onClick={handleSendMessage}
+          disabled={!inputValue.trim()}
+        >
+          <LucideIcon name="send" size={18} color="#FFFFFF" />
+        </button>
+      )}
+    </div>
+  );
+
+  // ==========================================
+  // Render
+  // ==========================================
+
   return (
     <div className="app">
       <Settings isOpen={showSettings} onClose={() => setShowSettings(false)} />
-      
+
       {/* Sidebar */}
       <aside className="sidebar" style={{ width: `${sidebarWidth}px` }}>
-        {/* Drag region - aligns with macOS traffic lights */}
         <div className="sidebar-titlebar" data-tauri-drag-region />
 
-        {/* Logo */}
         <div className="logo">
           <img src={logo} alt="Logo" className="logo-img" />
           <span className="logo-text">NexaCode</span>
         </div>
 
-        {/* Sidebar body */}
         <div className="sidebar-body">
           <div className="skills-menu">
             <button className="new-chat-btn" onClick={handleNewChat}>
@@ -287,14 +562,21 @@ function App() {
           </div>
 
           <div className="chat-list-container">
-            {chats.map((chat) => (
+            {sessions.map((session) => (
               <div
-                key={chat.id}
-                className={`chat-item ${activeChatId === chat.id ? 'active' : ''}`}
-                onClick={() => handleSelectChat(chat.id)}
+                key={session.id}
+                className={`chat-item ${activeSessionId === session.id ? 'active' : ''}`}
+                onClick={() => handleSelectSession(session.id)}
               >
-                <span className="chat-item-title">{chat.title}</span>
-                <span className="chat-item-date">{chat.date}</span>
+                <span className="chat-item-title">{session.title}</span>
+                <span className="chat-item-date">{formatDate(session.updated_at)}</span>
+                <button
+                  className="chat-item-delete"
+                  onClick={(e) => handleDeleteSession(e, session.id)}
+                  title="Delete"
+                >
+                  <LucideIcon name="x" size={12} color="var(--text-tertiary)" />
+                </button>
               </div>
             ))}
           </div>
@@ -306,21 +588,21 @@ function App() {
             <span>Settings</span>
           </button>
         </div>
-       </aside>
+      </aside>
 
-       {/* Resize handle */}
-       <div 
-         className="resize-handle" 
-         style={{ left: `${sidebarWidth}px` }}
-         onMouseDown={handleMouseDown}
-       />
+      {/* Resize handle */}
+      <div
+        className="resize-handle"
+        style={{ left: `${sidebarWidth}px` }}
+        onMouseDown={handleMouseDown}
+      />
 
-       {/* Main Content */}
-       <main className="main-content">
+      {/* Main Content */}
+      <main className="main-content">
         <div className="content-titlebar" data-tauri-drag-region />
 
         <div className="content-body">
-          {messages.length === 0 ? (
+          {messages.length === 0 && !agent.isRunning && agent.steps.length === 0 ? (
             <div className="welcome-area">
               <div className="welcome-icon">
                 <LucideIcon name="sparkles" size={36} color="var(--accent-primary)" />
@@ -345,83 +627,24 @@ function App() {
                     onChange={(e) => setInputValue(e.target.value)}
                     onInput={handleTextareaInput}
                     onKeyDown={handleKeyDown}
-                    disabled={isLoading}
+                    disabled={isAnyLoading}
                   />
                   <div className="input-actions">
                     <button className="attachment-btn">
                       <LucideIcon name="plus" size={20} color="var(--text-tertiary)" />
                     </button>
-                    <div className="right-actions">
-                      {showCustomModel ? (
-                        <div className="custom-model-input">
-                          <input
-                            type="text"
-                            value={customModel}
-                            onChange={(e) => setCustomModel(e.target.value)}
-                            placeholder="model-name"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleAddCustomModel();
-                              }
-                              if (e.key === 'Escape') {
-                                setShowCustomModel(false);
-                                setCustomModel('');
-                              }
-                            }}
-                          />
-                          <button onClick={handleAddCustomModel} className="add-model-btn">
-                            <LucideIcon name="check" size={16} color="var(--accent-primary)" />
-                          </button>
-                          <button onClick={() => { setShowCustomModel(false); setCustomModel(''); }} className="cancel-model-btn">
-                            <LucideIcon name="x" size={16} color="var(--text-tertiary)" />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <select 
-                            className="model-select"
-                            value={model}
-                            onChange={(e) => setModel(e.target.value)}
-                          >
-                            {availableModels.length > 0 ? (
-                              availableModels.map((modelId) => (
-                                <option key={modelId} value={modelId}>{modelId}</option>
-                              ))
-                            ) : (
-                              <>
-                                <option value="gpt-4">GPT-4</option>
-                                <option value="gpt-4o">GPT-4o</option>
-                                <option value="gpt-3.5-turbo">GPT-3.5</option>
-                                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                              </>
-                            )}
-                          </select>
-                          <button 
-                            onClick={() => setShowCustomModel(true)} 
-                            className="custom-model-btn"
-                            title="Add custom model"
-                          >
-                            <LucideIcon name="plus" size={16} color="var(--text-secondary)" />
-                          </button>
-                        </>
-                      )}
-                      <button 
-                        className="send-btn"
-                        onClick={handleSendMessage}
-                        disabled={isLoading || !inputValue.trim()}
-                      >
-                        <LucideIcon name="send" size={18} color="#FFFFFF" />
-                      </button>
-                    </div>
+                    {renderInputActions()}
                   </div>
                 </div>
                 <div className="options-container">
                   <div className="options-left">
-                    <select className="option-select">
-                      <option value="build">Build</option>
-                      <option value="plan">Plan</option>
+                    <select
+                      className="option-select"
+                      value={chatMode}
+                      onChange={(e) => setChatMode(e.target.value as ChatMode)}
+                    >
+                      <option value="build">Build (Agent)</option>
+                      <option value="chat">Chat</option>
                     </select>
                     <button className="folder-btn">
                       <LucideIcon name="folder" size={16} color="var(--text-secondary)" />
@@ -434,8 +657,9 @@ function App() {
           ) : (
             <div className="chat-area">
               <div className="messages-container">
+                {/* Render all messages in order — steps are embedded in assistant messages */}
                 {messages.map((msg, idx) => (
-                  <div key={idx} className={`message ${msg.role}`}>
+                  <div key={idx} className={`message ${msg.role} ${msg.steps ? 'agent' : ''}`}>
                     {msg.role === 'user' ? (
                       <div className="message-row user-row">
                         <div className="message-body user-body">
@@ -453,26 +677,76 @@ function App() {
                           <LucideIcon name="zap" size={16} color="#FFFFFF" />
                         </div>
                         <div className="message-body assistant-body">
+                          {/* Agent steps (from saved data) */}
+                          {msg.steps && msg.steps.length > 0 && (
+                            <div className="agent-steps-container">
+                              {msg.steps.map((step, sIdx) => (
+                                <AgentStepView
+                                  key={step.id}
+                                  step={step}
+                                  stepIndex={sIdx}
+                                  isAgentRunning={false}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {/* Final text content */}
                           <MarkdownRenderer content={msg.content} />
                         </div>
                       </div>
                     )}
                   </div>
                 ))}
-                {isLoading && streamingContent && (
-                  <div className="message assistant streaming">
+
+                {/* Live agent steps (while agent is running) */}
+                {agent.isRunning && chatMode === 'build' && (
+                  <div className="message assistant agent">
+                    <div className="message-row assistant-row">
+                      <div className="message-avatar assistant-avatar">
+                        <LucideIcon name="zap" size={16} color="#FFFFFF" />
+                      </div>
+                      <div className="message-body assistant-body">
+                        <div className="agent-steps-container">
+                          {agent.steps.map((step, idx) => (
+                            <AgentStepView
+                              key={step.id}
+                              step={step}
+                              stepIndex={idx}
+                              isAgentRunning={agent.isRunning}
+                            />
+                          ))}
+                        </div>
+
+                        <div className="agent-running-indicator">
+                          <div className="agent-running-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                          </div>
+                          <span>Agent is working...</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Streaming content (chat mode) */}
+                {streamingContent && chatMode === 'chat' && (
+                  <div className={`message assistant ${isLoading ? 'streaming' : ''}`}>
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
                         <LucideIcon name="zap" size={16} color="#FFFFFF" />
                       </div>
                       <div className="message-body assistant-body">
                         <MarkdownRenderer content={streamingContent} />
-                        <span className="streaming-cursor" />
+                        {isLoading && <span className="streaming-cursor" />}
                       </div>
                     </div>
                   </div>
                 )}
-                {isLoading && !streamingContent && (
+
+                {/* Thinking indicator (chat mode) */}
+                {isLoading && !streamingContent && chatMode === 'chat' && (
                   <div className="message assistant loading">
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
@@ -491,6 +765,7 @@ function App() {
                     </div>
                   </div>
                 )}
+
                 <div ref={messagesEndRef} />
               </div>
 
@@ -511,76 +786,29 @@ function App() {
                     onChange={(e) => setInputValue(e.target.value)}
                     onInput={handleTextareaInput}
                     onKeyDown={handleKeyDown}
-                    disabled={isLoading}
+                    disabled={isAnyLoading}
                   />
                   <div className="input-actions">
                     <button className="attachment-btn">
                       <LucideIcon name="plus" size={20} color="var(--text-tertiary)" />
                     </button>
-                    <div className="right-actions">
-                      {showCustomModel ? (
-                        <div className="custom-model-input">
-                          <input
-                            type="text"
-                            value={customModel}
-                            onChange={(e) => setCustomModel(e.target.value)}
-                            placeholder="model-name"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleAddCustomModel();
-                              }
-                              if (e.key === 'Escape') {
-                                setShowCustomModel(false);
-                                setCustomModel('');
-                              }
-                            }}
-                          />
-                          <button onClick={handleAddCustomModel} className="add-model-btn">
-                            <LucideIcon name="check" size={16} color="var(--accent-primary)" />
-                          </button>
-                          <button onClick={() => { setShowCustomModel(false); setCustomModel(''); }} className="cancel-model-btn">
-                            <LucideIcon name="x" size={16} color="var(--text-tertiary)" />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <select 
-                            className="model-select"
-                            value={model}
-                            onChange={(e) => setModel(e.target.value)}
-                          >
-                            {availableModels.length > 0 ? (
-                              availableModels.map((modelId) => (
-                                <option key={modelId} value={modelId}>{modelId}</option>
-                              ))
-                            ) : (
-                              <>
-                                <option value="gpt-4">GPT-4</option>
-                                <option value="gpt-4o">GPT-4o</option>
-                                <option value="gpt-3.5-turbo">GPT-3.5</option>
-                                <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                              </>
-                            )}
-                          </select>
-                          <button 
-                            onClick={() => setShowCustomModel(true)} 
-                            className="custom-model-btn"
-                            title="Add custom model"
-                          >
-                            <LucideIcon name="plus" size={16} color="var(--text-secondary)" />
-                          </button>
-                        </>
-                      )}
-                      <button 
-                        className="send-btn"
-                        onClick={handleSendMessage}
-                        disabled={isLoading || !inputValue.trim()}
-                      >
-                        <LucideIcon name="send" size={18} color="#FFFFFF" />
-                      </button>
-                    </div>
+                    {renderInputActions()}
+                  </div>
+                </div>
+                <div className="options-container">
+                  <div className="options-left">
+                    <select
+                      className="option-select"
+                      value={chatMode}
+                      onChange={(e) => setChatMode(e.target.value as ChatMode)}
+                    >
+                      <option value="build">Build (Agent)</option>
+                      <option value="chat">Chat</option>
+                    </select>
+                    <button className="folder-btn">
+                      <LucideIcon name="folder" size={16} color="var(--text-secondary)" />
+                      <span>Select Folder</span>
+                    </button>
                   </div>
                 </div>
               </div>
