@@ -315,10 +315,10 @@ function App() {
   }, [streamingContent, isLoading, activeSessionId, saveCurrentSession]);
 
   // When agent completes, create a single assistant message with steps + final content
+  const { isRunning: isAgentRunning, finalResponse: agentFinalResponse, steps: agentSteps, reset: resetAgent } = agent;
   useEffect(() => {
-    if (!agent.isRunning && agent.finalResponse && activeSessionId) {
-      const content = agent.finalResponse.content;
-      const agentSteps = agent.steps;
+    if (!isAgentRunning && agentFinalResponse && activeSessionId) {
+      const content = agentFinalResponse.content;
 
       setMessages((prev) => {
         // Build the assistant message with embedded steps
@@ -332,8 +332,10 @@ function App() {
         saveCurrentSession(activeSessionId, newMessages);
         return newMessages;
       });
+
+      resetAgent();
     }
-  }, [agent.isRunning, agent.finalResponse, activeSessionId, saveCurrentSession, agent.steps]);
+  }, [isAgentRunning, agentFinalResponse, activeSessionId, saveCurrentSession, agentSteps, resetAgent]);
 
   // ==========================================
   // Provider loading
@@ -751,15 +753,29 @@ function App() {
                       </div>
                       <div className="message-body assistant-body">
                         <div className="agent-steps-container">
-                          {agent.steps.map((step, idx) => (
-                            <AgentStepView
-                              key={step.id}
-                              step={step}
-                              stepIndex={idx}
-                              isAgentRunning={agent.isRunning}
-                            />
-                          ))}
+                          {agent.steps
+                            .filter((step, idx) => !(idx === agent.steps.length - 1 && step.status === 'thinking'))
+                            .map((step, idx) => (
+                              <AgentStepView
+                                key={step.id}
+                                step={step}
+                                stepIndex={idx}
+                                isAgentRunning={agent.isRunning}
+                              />
+                            ))}
                         </div>
+
+                        {(() => {
+                          const lastStep = agent.steps[agent.steps.length - 1];
+                          if (lastStep && lastStep.status === 'thinking' && lastStep.thinking) {
+                            return (
+                              <div className="agent-live-content" style={{ marginTop: '12px' }}>
+                                <MarkdownRenderer content={lastStep.thinking} />
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
 
                         <div className="agent-running-indicator">
                           <div className="agent-running-dots">
