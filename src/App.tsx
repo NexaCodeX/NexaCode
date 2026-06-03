@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 /* eslint-disable react-hooks/purity */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './styles/main.scss';
 import logo from './assets/logo.png';
@@ -122,9 +122,10 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>('build');
-  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
 
   // Debounce timer for saving session
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -286,20 +287,23 @@ function App() {
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget;
-    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 50;
-    setUserHasScrolledUp(!isAtBottom);
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 15;
+    isAtBottomRef.current = isAtBottom;
   };
 
   // Reset scroll lock when switching sessions
   useEffect(() => {
-    setUserHasScrolledUp(false);
+    isAtBottomRef.current = true;
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
   }, [activeSessionId]);
 
-  useEffect(() => {
-    if (!userHasScrolledUp) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  useLayoutEffect(() => {
+    if (isAtBottomRef.current && messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
     }
-  }, [messages, streamingContent, agent.steps, userHasScrolledUp]);
+  }, [messages, streamingContent, agent.steps]);
 
   // When streaming completes (Chat mode), add assistant message to messages and save
   useEffect(() => {
@@ -395,7 +399,7 @@ function App() {
 
     console.log('[App] handleSendMessage called, chatMode:', chatMode, 'model:', model);
 
-    setUserHasScrolledUp(false);
+    isAtBottomRef.current = true;
 
     const userMessage: Message = { role: 'user', content: inputValue.trim() };
     const newMessages = [...messages, userMessage];
@@ -743,7 +747,11 @@ function App() {
             </div>
           ) : (
             <div className="chat-area">
-              <div className="messages-container" onScroll={handleScroll}>
+              <div
+                ref={messagesContainerRef}
+                className="messages-container"
+                onScroll={handleScroll}
+              >
                 {/* Render all messages in order — steps are embedded in assistant messages */}
                 {messages.map((msg, idx) => (
                   <div key={idx} className={`message ${msg.role} ${msg.steps ? 'agent' : ''}`}>
