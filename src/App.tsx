@@ -725,9 +725,17 @@ function App() {
                       <option value="build">Build (Agent)</option>
                       <option value="chat">Chat</option>
                     </select>
-                    <button className="folder-btn">
+                    <button
+                      className="folder-btn"
+                      onClick={handleSelectFolder}
+                      title={currentFolder || undefined}
+                    >
                       <LucideIcon name="folder" size={16} color="var(--text-secondary)" />
-                      <span>Select Folder</span>
+                      <span>
+                        {currentFolder
+                          ? (currentFolder.split(/[\\/]/).pop() || currentFolder)
+                          : 'Select Folder'}
+                      </span>
                     </button>
                   </div>
                 </div>
