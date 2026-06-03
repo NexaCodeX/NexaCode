@@ -137,16 +137,61 @@ const markdownComponents = {
 
 interface MarkdownRendererProps {
   content: string;
+  disableThinkingWrapper?: boolean;
 }
 
-export function MarkdownRenderer({ content }: MarkdownRendererProps) {
+const parseThinking = (text: string) => {
+  let thinking = '';
+  let main = '';
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    const openTags = [
+      { open: '[THINKING]', close: '[/THINKING]' },
+      { open: '<think>', close: '</think>' },
+      { open: '<THINK>', close: '</THINK>' }
+    ];
+
+    let firstOpenIdx = -1;
+    let selectedTag = openTags[0];
+
+    for (const tag of openTags) {
+      const idx = remaining.indexOf(tag.open);
+      if (idx !== -1 && (firstOpenIdx === -1 || idx < firstOpenIdx)) {
+        firstOpenIdx = idx;
+        selectedTag = tag;
+      }
+    }
+
+    if (firstOpenIdx === -1) {
+      main += remaining;
+      break;
+    }
+
+    main += remaining.slice(0, firstOpenIdx);
+    const remainingAfterOpen = remaining.slice(firstOpenIdx + selectedTag.open.length);
+    const closeIdx = remainingAfterOpen.indexOf(selectedTag.close);
+
+    if (closeIdx === -1) {
+      // Unclosed tag at the end (useful during active streaming)
+      thinking += remainingAfterOpen;
+      break;
+    } else {
+      thinking += remainingAfterOpen.slice(0, closeIdx);
+      remaining = remainingAfterOpen.slice(closeIdx + selectedTag.close.length);
+    }
+  }
+
+  return {
+    thinkingContent: thinking,
+    mainContent: main.trim(),
+  };
+};
+
+export function MarkdownRenderer({ content, disableThinkingWrapper = false }: MarkdownRendererProps) {
   const [thinkingOpen, setThinkingOpen] = useState(false);
 
-  // Parse thinking blocks
-  const thinkingRegex = /\[THINKING\]([\s\S]*?)\[\/THINKING\]/g;
-  const thinkingMatches = [...content.matchAll(thinkingRegex)];
-  const thinkingContent = thinkingMatches.map((m) => m[1]).join('');
-  const mainContent = content.replace(thinkingRegex, '').trim();
+  const { thinkingContent, mainContent } = parseThinking(content);
 
   // Auto-expand thinking block when there's no main content (still thinking)
   const isThinkingComplete = mainContent.length > 0;
@@ -155,30 +200,40 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   return (
     <div className="markdown-content">
       {thinkingContent && (
-        <div className={`thinking-block ${showThinkingContent ? 'open' : ''}`}>
-          <button
-            className="thinking-header"
-            onClick={() => setThinkingOpen(!thinkingOpen)}
+        disableThinkingWrapper ? (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeHighlight]}
+            components={markdownComponents}
           >
-            <span>Thinking</span>
-            <LucideIcon
-              name={showThinkingContent ? 'chevron-down' : 'chevron-right'}
-              size={14}
-              color="#9C9B99"
-            />
-          </button>
-          <div className={`thinking-content ${showThinkingContent ? 'open' : ''}`}>
-            <div className="thinking-content-inner">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight]}
-                components={markdownComponents}
-              >
-                {thinkingContent}
-              </ReactMarkdown>
+            {thinkingContent}
+          </ReactMarkdown>
+        ) : (
+          <div className={`thinking-block ${showThinkingContent ? 'open' : ''}`}>
+            <button
+              className="thinking-header"
+              onClick={() => setThinkingOpen(!thinkingOpen)}
+            >
+              <span>Thinking</span>
+              <LucideIcon
+                name={showThinkingContent ? 'chevron-down' : 'chevron-right'}
+                size={14}
+                color="#9C9B99"
+              />
+            </button>
+            <div className={`thinking-content ${showThinkingContent ? 'open' : ''}`}>
+              <div className="thinking-content-inner">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                  components={markdownComponents}
+                >
+                  {thinkingContent}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
-        </div>
+        )
       )}
 
       {mainContent && (

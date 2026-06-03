@@ -632,6 +632,18 @@ impl LLMProvider for OpenAIProvider {
                             {
                                 if let Some(choice) = response_data.choices.first() {
                                     if let Some(d) = &choice.delta {
+                                        if let Some(reasoning) = &d.reasoning_content {
+                                            if !reasoning.is_empty() {
+                                                chunks.push(Ok(StreamChunk {
+                                                    delta: format!(
+                                                        "[THINKING]{}[/THINKING]",
+                                                        reasoning
+                                                    ),
+                                                    finish_reason: None,
+                                                    tool_call_delta: None,
+                                                }));
+                                            }
+                                        }
                                         if let Some(content) = &d.content {
                                             if !content.is_empty() {
                                                 chunks.push(Ok(StreamChunk {

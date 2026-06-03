@@ -48,7 +48,7 @@ export function AgentStepView({ step, stepIndex }: AgentStepViewProps) {
             </button>
             {thinkingExpanded && (
               <div className="agent-thinking-body">
-                <MarkdownRenderer content={step.thinking} />
+                <MarkdownRenderer content={step.thinking} disableThinkingWrapper={true} />
               </div>
             )}
           </div>
