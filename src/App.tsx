@@ -744,8 +744,8 @@ function App() {
                   </div>
                 ))}
 
-                {/* Live agent steps (while agent is running) */}
-                {agent.isRunning && chatMode === 'build' && (
+                {/* Live agent steps (while agent is running or final response is not yet committed) */}
+                {(isAgentRunning || agentFinalResponse) && chatMode === 'build' && (
                   <div className="message assistant agent">
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
@@ -774,6 +774,14 @@ function App() {
                               </div>
                             );
                           }
+                          // Fallback to final response content if set but not yet reset
+                          if (agentFinalResponse?.content) {
+                            return (
+                              <div className="agent-live-content" style={{ marginTop: '12px' }}>
+                                <MarkdownRenderer content={agentFinalResponse.content} />
+                              </div>
+                            );
+                          }
                           return null;
                         })()}
 
@@ -790,8 +798,8 @@ function App() {
                   </div>
                 )}
 
-                {/* Streaming content (chat mode) */}
-                {streamingContent && chatMode === 'chat' && (
+                {/* Streaming content (chat mode) — render while loading or if not yet appended to messages list */}
+                {streamingContent && chatMode === 'chat' && (isLoading || messages[messages.length - 1]?.content !== streamingContent) && (
                   <div className={`message assistant ${isLoading ? 'streaming' : ''}`}>
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
