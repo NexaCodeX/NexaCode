@@ -455,14 +455,21 @@ function App() {
   };
 
   const handleSelectFolder = async () => {
+    console.log('[Folder Selector] handleSelectFolder clicked');
     try {
+      console.log('[Folder Selector] Invoking select_directory command...');
       const selected = await invoke<string | null>('select_directory');
+      console.log('[Folder Selector] select_directory result:', selected);
       if (selected) {
+        console.log('[Folder Selector] Setting working directory to:', selected);
         await invoke('tool_set_working_dir', { path: selected });
         setCurrentFolder(selected);
+        console.log('[Folder Selector] Folder updated successfully to:', selected);
+      } else {
+        console.log('[Folder Selector] Selection was cancelled or returned null');
       }
     } catch (e) {
-      console.error('Failed to select folder:', e);
+      console.error('[Folder Selector] Failed to select folder:', e);
     }
   };
 
