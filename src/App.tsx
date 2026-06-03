@@ -123,6 +123,7 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>('build');
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
+  const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Debounce timer for saving session
@@ -180,6 +181,19 @@ function App() {
   useEffect(() => {
     refreshSessions();
   }, [refreshSessions]);
+
+  // Load initial working directory on mount
+  useEffect(() => {
+    const fetchWorkingDir = async () => {
+      try {
+        const path = await invoke<string>('tool_get_working_dir');
+        setCurrentFolder(path);
+      } catch (e) {
+        console.error('Failed to get working directory:', e);
+      }
+    };
+    fetchWorkingDir();
+  }, []);
 
   // Load a session's messages from backend
   const loadSessionMessages = async (sessionId: string) => {
@@ -437,6 +451,18 @@ function App() {
     }
     if (isLoading) {
       cancelStream();
+    }
+  };
+
+  const handleSelectFolder = async () => {
+    try {
+      const selected = await invoke<string | null>('select_directory');
+      if (selected) {
+        await invoke('tool_set_working_dir', { path: selected });
+        setCurrentFolder(selected);
+      }
+    } catch (e) {
+      console.error('Failed to select folder:', e);
     }
   };
 
@@ -875,9 +901,17 @@ function App() {
                       <option value="build">Build (Agent)</option>
                       <option value="chat">Chat</option>
                     </select>
-                    <button className="folder-btn">
+                    <button
+                      className="folder-btn"
+                      onClick={handleSelectFolder}
+                      title={currentFolder || undefined}
+                    >
                       <LucideIcon name="folder" size={16} color="var(--text-secondary)" />
-                      <span>Select Folder</span>
+                      <span>
+                        {currentFolder
+                          ? (currentFolder.split(/[\\/]/).pop() || currentFolder)
+                          : 'Select Folder'}
+                      </span>
                     </button>
                   </div>
                 </div>

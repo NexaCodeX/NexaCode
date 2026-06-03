@@ -43,6 +43,7 @@ pub fn run() {
             tools::tool_requires_confirmation,
             tools::tool_set_working_dir,
             tools::tool_get_working_dir,
+            tools::select_directory,
             // Agent commands
             agent::agent_run,
             agent::agent_step

@@ -141,3 +141,13 @@ pub async fn tool_get_working_dir(
     let context = state.context.read().await;
     Ok(context.working_dir.to_string_lossy().to_string())
 }
+
+#[tauri::command]
+pub async fn select_directory() -> Result<Option<String>, String> {
+    let res = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new().pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(res.map(|p| p.to_string_lossy().to_string()))
+}
