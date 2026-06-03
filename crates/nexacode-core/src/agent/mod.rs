@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use futures::StreamExt;
 
 use crate::llm::types::{ChatOptions, Message};
 use crate::llm::LLMClient;
@@ -307,7 +308,7 @@ impl AgentLoop {
         let tool_definitions = self.registry.definitions();
 
         // Build chat options
-        let mut options = ChatOptions::new(model);
+        let mut options = ChatOptions::new(model).with_stream(true);
         if let Some(temp) = self.config.temperature {
             options = options.with_temperature(temp);
         }
@@ -328,23 +329,13 @@ impl AgentLoop {
                 l.log_request(&messages, model, iteration + 1).await;
             }
 
-            // Call LLM with tools
-            let response = match self
+            // Call LLM with tools in streaming mode
+            let mut stream = match self
                 .client
-                .chat_with_tools(messages.clone(), options.clone(), tool_definitions.clone())
+                .chat_stream_with_tools(messages.clone(), options.clone(), tool_definitions.clone())
                 .await
             {
-                Ok(r) => {
-                    log::info!("[Agent] LLM responded: has_tool_calls={}, content_len={}",
-                        r.has_tool_calls(),
-                        r.content.as_ref().map(|c| c.len()).unwrap_or(0)
-                    );
-                    // Log response to session log
-                    if let Some(ref l) = logger {
-                        l.log_response(&r, iteration + 1).await;
-                    }
-                    r
-                }
+                Ok(s) => s,
                 Err(e) => {
                     log::error!("[Agent] LLM call failed: {}", e);
                     on_event(AgentEvent::Error {
@@ -354,40 +345,103 @@ impl AgentLoop {
                 }
             };
 
+            let mut response_content = String::new();
+            let mut tool_calls_builder: std::collections::BTreeMap<usize, (Option<String>, Option<String>, String)> =
+                std::collections::BTreeMap::new();
+
+            while let Some(chunk_result) = stream.next().await {
+                match chunk_result {
+                    Ok(chunk) => {
+                        // 1. Handle text content (thinking/reasoning delta)
+                        if !chunk.delta.is_empty() {
+                            response_content.push_str(&chunk.delta);
+                            on_event(AgentEvent::Thinking {
+                                content: chunk.delta.clone(),
+                            });
+                        }
+
+                        // 2. Handle tool call deltas
+                        if let Some(tc_delta) = chunk.tool_call_delta {
+                            let entry = tool_calls_builder
+                                .entry(tc_delta.index)
+                                .or_insert((None, None, String::new()));
+                            if let Some(id) = tc_delta.id {
+                                entry.0 = Some(id);
+                            }
+                            if let Some(name) = tc_delta.name {
+                                entry.1 = Some(name);
+                            }
+                            if let Some(arg_delta) = tc_delta.arguments_delta {
+                                entry.2.push_str(&arg_delta);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("[Agent] LLM stream error: {}", e);
+                        on_event(AgentEvent::Error {
+                            message: format!("LLM stream error: {}", e),
+                        });
+                        return;
+                    }
+                }
+            }
+
+            // Build the final response and tool calls list from accumulated data
+            let has_tool_calls = !tool_calls_builder.is_empty();
+            let mut tool_calls = Vec::new();
+            for (_index, (id, name, args_str)) in tool_calls_builder {
+                let id = id.unwrap_or_default();
+                let name = name.unwrap_or_default();
+                let arguments: serde_json::Value = serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Null);
+                tool_calls.push(crate::llm::types::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                });
+            }
+
+            let response = crate::llm::types::ToolAwareResponse {
+                content: if response_content.is_empty() {
+                    None
+                } else {
+                    Some(response_content.clone())
+                },
+                tool_calls: tool_calls.clone(),
+                model: model.to_string(),
+                usage: None,
+                stop_reason: None,
+            };
+
+            log::info!("[Agent] LLM responded: has_tool_calls={}, content_len={}",
+                has_tool_calls,
+                response_content.len()
+            );
+
+            // Log response to session log
+            if let Some(ref l) = logger {
+                l.log_response(&response, iteration + 1).await;
+            }
+
             // Check if LLM responded with text (no tool calls)
             if !response.has_tool_calls() {
-                let content = response.content.unwrap_or_default();
-                log::info!("[Agent] Completed with content: {} chars", content.len());
+                log::info!("[Agent] Completed with content: {} chars", response_content.len());
 
                 // Log the final completion
                 if let Some(ref l) = logger {
-                    l.log_run_completed(&content, iteration + 1).await;
+                    l.log_run_completed(&response_content, iteration + 1).await;
                 }
 
                 on_event(AgentEvent::Completed {
-                    content: content.clone(),
+                    content: response_content.clone(),
                 });
                 tokio::time::sleep(event_delay).await;
 
                 // Add assistant message to history
-                messages.push(Message::assistant(&content));
+                messages.push(Message::assistant(&response_content));
                 return;
             }
 
-            // LLM requested tool calls
-            // First, emit the text content if any (thinking)
-            if let Some(thinking) = &response.content {
-                if !thinking.is_empty() {
-                    log::info!("[Agent] Thinking: {} chars", thinking.len());
-                    on_event(AgentEvent::Thinking {
-                        content: thinking.clone(),
-                    });
-                    tokio::time::sleep(event_delay).await;
-                }
-            }
-
             // Add assistant's tool call message to conversation
-            let tool_calls = response.tool_calls.clone();
             log::info!("[Agent] Tool calls: {}", tool_calls.len());
             messages.push(Message::assistant_tool_calls(tool_calls.clone()));
 

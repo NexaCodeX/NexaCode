@@ -166,6 +166,14 @@ export function useAgent() {
         }
 
         case 'completed': {
+          setSteps((prev) => {
+            const lastStep = prev[prev.length - 1];
+            if (lastStep && lastStep.status === 'thinking') {
+              return prev.slice(0, -1);
+            }
+            return prev;
+          });
+
           setFinalResponse({
             content: event.content,
             isCompleted: true,
@@ -197,7 +205,7 @@ export function useAgent() {
         }
       }
     },
-    [nextStepId],
+    [nextStepId, steps],
   );
 
   /** Run the agent loop */

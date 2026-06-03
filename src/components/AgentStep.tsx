@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { LucideIcon } from './LucideIcon';
 import { ToolCallView } from './ToolCallView';
 import { DiffPreview } from './DiffPreview';
@@ -10,29 +10,7 @@ function isEditTool(name: string): boolean {
   return name === 'Edit' || name === 'MultiEdit' || name === 'Write';
 }
 
-/** Get the status icon for a step */
-function getStepStatusIcon(step: AgentStep): { icon: string; color: string } {
-  if (step.status === 'thinking') {
-    return { icon: 'brain', color: '#9C9B99' };
-  }
-  if (step.status === 'calling_tool' || step.status === 'tool_running') {
-    return { icon: 'loader', color: '#3D8A5A' };
-  }
-  if (step.toolResult?.is_error) {
-    return { icon: 'alert-circle', color: '#EF4444' };
-  }
-  if (step.status === 'tool_done') {
-    return { icon: 'check-circle', color: '#3D8A5A' };
-  }
-  if (step.status === 'done') {
-    // Completed thinking step (no tool call)
-    return { icon: 'check-circle', color: '#9C9B99' };
-  }
-  if (step.status === 'error') {
-    return { icon: 'alert-circle', color: '#EF4444' };
-  }
-  return { icon: 'zap', color: '#3D8A5A' };
-}
+
 
 interface AgentStepViewProps {
   step: AgentStep;
@@ -40,9 +18,8 @@ interface AgentStepViewProps {
   isAgentRunning: boolean;
 }
 
-export function AgentStepView({ step, stepIndex, isAgentRunning }: AgentStepViewProps) {
+export function AgentStepView({ step, stepIndex }: AgentStepViewProps) {
   const [thinkingExpanded, setThinkingExpanded] = useState(true);
-  const statusConfig = getStepStatusIcon(step);
   const isRunning = step.status === 'thinking' || step.status === 'calling_tool' || step.status === 'tool_running';
 
   return (

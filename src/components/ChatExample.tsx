@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useEffect, useCallback } from 'react';
 import type { ChatMessage } from '../services/llm';
 import { useLLM } from '../hooks/useLLM';
 
@@ -20,14 +21,14 @@ export function ChatExample() {
     clearError,
   } = useLLM();
 
-  useEffect(() => {
-    loadProviders();
-  }, []);
-
-  const loadProviders = async () => {
+  const loadProviders = useCallback(async () => {
     const providerList = await listProviders();
     setProviders(providerList);
-  };
+  }, [listProviders]);
+
+  useEffect(() => {
+    loadProviders();
+  }, [loadProviders]);
 
   const handleSetupOpenAI = async () => {
     const apiKey = prompt('Enter your OpenAI API key:');

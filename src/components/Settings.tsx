@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useState, useEffect, useCallback } from 'react';
 import { useLLM } from '../hooks/useLLM';
 import { LucideIcon } from './LucideIcon';
 
@@ -23,18 +24,18 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
 
   const { addProvider, setActiveProvider, listProviders, getActiveProvider, removeProvider, getProviderConfig, updateProvider, listModels, error } = useLLM();
 
-  useEffect(() => {
-    if (isOpen) {
-      loadProviders();
-    }
-  }, [isOpen]);
-
-  const loadProviders = async () => {
+  const loadProviders = useCallback(async () => {
     const providerList = await listProviders();
     setProviders(providerList);
     const active = await getActiveProvider();
     setActiveProviderState(active);
-  };
+  }, [listProviders, getActiveProvider]);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadProviders();
+    }
+  }, [isOpen, loadProviders]);
 
   const handleAddProvider = async () => {
     if (!newProvider.name || !newProvider.apiKey) {
@@ -95,7 +96,7 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
     if (config) {
       setNewProvider({
         name: name,
-        type: config.provider_type as any,
+        type: config.provider_type as 'openai' | 'anthropic' | 'openai_compatible',
         apiKey: config.api_key,
         baseUrl: config.base_url || '',
         models: config.models || [],
@@ -218,7 +219,7 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
         <label>Type *</label>
         <select
           value={newProvider.type}
-          onChange={(e) => setNewProvider({ ...newProvider, type: e.target.value as any })}
+          onChange={(e) => setNewProvider({ ...newProvider, type: e.target.value as 'openai' | 'anthropic' | 'openai_compatible' })}
         >
           <option value="openai">OpenAI</option>
           <option value="anthropic">Anthropic (Claude)</option>

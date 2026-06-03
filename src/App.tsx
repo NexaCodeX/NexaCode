@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect */
+/* eslint-disable react-hooks/purity */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import './styles/main.scss';
@@ -120,10 +122,28 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>('build');
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Debounce timer for saving session
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Composition state for IME
+  const isComposingRef = useRef(false);
+  const isComposingJustEndedRef = useRef(false);
+
+  const handleCompositionStart = () => {
+    isComposingRef.current = true;
+    isComposingJustEndedRef.current = false;
+  };
+
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false;
+    isComposingJustEndedRef.current = true;
+    setTimeout(() => {
+      isComposingJustEndedRef.current = false;
+    }, 50);
+  };
 
   const {
     isLoading,
@@ -146,20 +166,20 @@ function App() {
   // Session persistence
   // ==========================================
 
-  // Load session list on mount
-  useEffect(() => {
-    refreshSessions();
-  }, []);
-
   // Refresh session list from backend
-  const refreshSessions = async () => {
+  const refreshSessions = useCallback(async () => {
     try {
       const list = await invoke<SessionMeta[]>('list_sessions');
       setSessions(list);
     } catch (e) {
       console.error('Failed to load sessions:', e);
     }
-  };
+  }, []);
+
+  // Load session list on mount
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
 
   // Load a session's messages from backend
   const loadSessionMessages = async (sessionId: string) => {
@@ -209,7 +229,7 @@ function App() {
         console.error('Failed to save session:', e);
       }
     }, 500); // 500ms debounce
-  }, []);
+  }, [refreshSessions]);
 
   // ==========================================
   // Sidebar resize
@@ -250,9 +270,22 @@ function App() {
   // Auto-scroll & streaming completion
   // ==========================================
 
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 50;
+    setUserHasScrolledUp(!isAtBottom);
+  };
+
+  // Reset scroll lock when switching sessions
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent, agent.steps]);
+    setUserHasScrolledUp(false);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!userHasScrolledUp) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, streamingContent, agent.steps, userHasScrolledUp]);
 
   // When streaming completes (Chat mode), add assistant message to messages and save
   useEffect(() => {
@@ -306,11 +339,7 @@ function App() {
   // Provider loading
   // ==========================================
 
-  useEffect(() => {
-    loadProviders();
-  }, []);
-
-  const loadProviders = async () => {
+  const loadProviders = useCallback(async () => {
     const providerList = await listProviders();
     if (providerList.length === 0) {
       setShowSettings(true);
@@ -324,7 +353,11 @@ function App() {
         }
       }
     }
-  };
+  }, [listProviders, getActiveProvider, getProviderConfig]);
+
+  useEffect(() => {
+    loadProviders();
+  }, [loadProviders]);
 
   // ==========================================
   // Chat actions
@@ -345,6 +378,8 @@ function App() {
     }
 
     console.log('[App] handleSendMessage called, chatMode:', chatMode, 'model:', model);
+
+    setUserHasScrolledUp(false);
 
     const userMessage: Message = { role: 'user', content: inputValue.trim() };
     const newMessages = [...messages, userMessage];
@@ -405,9 +440,16 @@ function App() {
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // If the user is composing text with an IME (e.g. Chinese pinyin input),
-    // ignore Enter so the IME can handle candidate selection instead of
-    // accidentally sending the message.
-    if (e.nativeEvent.isComposing) return;
+    // or composition just ended, ignore Enter so the IME can handle candidate
+    // selection instead of accidentally sending the message.
+    if (
+      isComposingRef.current ||
+      isComposingJustEndedRef.current ||
+      e.nativeEvent.isComposing ||
+      e.keyCode === 229
+    ) {
+      return;
+    }
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -627,6 +669,8 @@ function App() {
                     onChange={(e) => setInputValue(e.target.value)}
                     onInput={handleTextareaInput}
                     onKeyDown={handleKeyDown}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
                     disabled={isAnyLoading}
                   />
                   <div className="input-actions">
@@ -656,7 +700,7 @@ function App() {
             </div>
           ) : (
             <div className="chat-area">
-              <div className="messages-container">
+              <div className="messages-container" onScroll={handleScroll}>
                 {/* Render all messages in order — steps are embedded in assistant messages */}
                 {messages.map((msg, idx) => (
                   <div key={idx} className={`message ${msg.role} ${msg.steps ? 'agent' : ''}`}>
@@ -786,6 +830,8 @@ function App() {
                     onChange={(e) => setInputValue(e.target.value)}
                     onInput={handleTextareaInput}
                     onKeyDown={handleKeyDown}
+                    onCompositionStart={handleCompositionStart}
+                    onCompositionEnd={handleCompositionEnd}
                     disabled={isAnyLoading}
                   />
                   <div className="input-actions">
