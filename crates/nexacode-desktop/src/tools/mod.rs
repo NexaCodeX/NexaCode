@@ -143,11 +143,11 @@ pub async fn tool_get_working_dir(
 }
 
 #[tauri::command]
-pub async fn select_directory() -> Result<Option<String>, String> {
-    let res = tokio::task::spawn_blocking(|| {
-        rfd::FileDialog::new().pick_folder()
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(res.map(|p| p.to_string_lossy().to_string()))
+pub async fn select_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.run_on_main_thread(move || {
+        let res = rfd::FileDialog::new().pick_folder();
+        let _ = tx.send(res.map(|p| p.to_string_lossy().to_string()));
+    }).map_err(|e| e.to_string())?;
+    rx.await.map_err(|e| e.to_string())
 }
