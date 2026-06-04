@@ -128,6 +128,9 @@ pub fn default_registry() -> ToolRegistry {
     // Task management
     registry.register(super::task::TaskTool::new());
 
+    // CodeGraph
+    registry.register(super::codegraph::CodeGraphTool::new());
+
     registry
 }
 

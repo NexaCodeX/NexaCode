@@ -53,7 +53,7 @@
   @include flex-column;
   gap: $spacing-md;
   padding: 0 $spacing-md $spacing-md;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 // New Chat Button
@@ -85,6 +85,25 @@
   gap: $spacing-xs;
   flex: 1;
   overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 2px;
+  }
+
+  &:hover {
+    &::-webkit-scrollbar-thumb {
+      background: $border-strong;
+    }
+  }
 }
 
 .chat-item {

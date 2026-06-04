@@ -9,6 +9,7 @@ import { Settings } from './components/Settings';
 import { MarkdownRenderer } from './components/MarkdownRenderer';
 import { AgentStepView } from './components/AgentStep';
 import { Terminal } from './components/Terminal';
+import { CodeGraphView } from './components/CodeGraphView';
 import { useLLM } from './hooks/useLLM';
 import { useAgent } from './hooks/useAgent';
 import type { ChatMessage } from './services/llm';
@@ -129,6 +130,7 @@ function App() {
   const [chatMode, setChatMode] = useState<ChatMode>('build');
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [showTerminal, setShowTerminal] = useState<boolean>(false);
+  const [activeUtilityTab, setActiveUtilityTab] = useState<'terminal' | 'codegraph'>('terminal');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -722,8 +724,6 @@ function App() {
             ))}
           </div>
 
-          <div className="spacer" />
-
           <button className="settings-btn" onClick={() => setShowSettings(true)}>
             <LucideIcon name="cog" size={16} color="var(--text-secondary)" />
             <span>Settings</span>
@@ -741,13 +741,36 @@ function App() {
       {/* Main Content */}
       <main className="main-content">
         <div className="content-titlebar" data-tauri-drag-region />
-        <button
-          className={`terminal-toggle-btn-top ${showTerminal ? 'active' : ''}`}
-          onClick={() => setShowTerminal(!showTerminal)}
-          title="Toggle Terminal"
-        >
-          <LucideIcon name="panel-bottom" size={16} />
-        </button>
+        <div className="utility-toggles-top">
+          <button
+            className={`terminal-toggle-btn-top ${showTerminal && activeUtilityTab === 'terminal' ? 'active' : ''}`}
+            onClick={() => {
+              if (showTerminal && activeUtilityTab === 'terminal') {
+                setShowTerminal(false);
+              } else {
+                setActiveUtilityTab('terminal');
+                setShowTerminal(true);
+              }
+            }}
+            title="Toggle Terminal"
+          >
+            <LucideIcon name="panel-bottom" size={16} />
+          </button>
+          <button
+            className={`terminal-toggle-btn-top codegraph-toggle-btn-top ${showTerminal && activeUtilityTab === 'codegraph' ? 'active' : ''}`}
+            onClick={() => {
+              if (showTerminal && activeUtilityTab === 'codegraph') {
+                setShowTerminal(false);
+              } else {
+                setActiveUtilityTab('codegraph');
+                setShowTerminal(true);
+              }
+            }}
+            title="Toggle CodeGraph Explorer"
+          >
+            <LucideIcon name="git-branch" size={16} />
+          </button>
+        </div>
 
         <div className="content-body">
           {messages.length === 0 && !agent.isRunning && agent.steps.length === 0 ? (
@@ -1023,10 +1046,16 @@ function App() {
               </div>
             </div>
           )}
-          {showTerminal && (
+          {showTerminal && activeUtilityTab === 'terminal' && (
             <Terminal
               currentFolder={currentFolder}
               onFolderChange={setCurrentFolder}
+              onClose={() => setShowTerminal(false)}
+            />
+          )}
+          {showTerminal && activeUtilityTab === 'codegraph' && (
+            <CodeGraphView
+              currentFolder={currentFolder}
               onClose={() => setShowTerminal(false)}
             />
           )}

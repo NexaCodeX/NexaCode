@@ -296,11 +296,17 @@
   border-top: 1px solid $border-subtle;
 }
 
-.terminal-toggle-btn-top {
+.utility-toggles-top {
   position: absolute;
   top: 5px;
   right: 16px;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-toggle-btn-top {
   width: 28px;
   height: 28px;
   border-radius: 6px;

@@ -3,7 +3,6 @@ use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::Mutex;
-use tokio::process::Child;
 use tokio::process::Command;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
@@ -13,7 +12,7 @@ use tauri::Emitter;
 pub struct ToolState {
     pub registry: Arc<RwLock<ToolRegistry>>,
     pub context: Arc<RwLock<ToolContext>>,
-    pub current_process: Arc<Mutex<Option<Child>>>,
+    pub current_pid: Arc<Mutex<Option<u32>>>,
 }
 
 impl ToolState {
@@ -23,7 +22,7 @@ impl ToolState {
         Self {
             registry: Arc::new(RwLock::new(registry)),
             context: Arc::new(RwLock::new(context)),
-            current_process: Arc::new(Mutex::new(None)),
+            current_pid: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -33,7 +32,7 @@ impl Clone for ToolState {
         Self {
             registry: Arc::clone(&self.registry),
             context: Arc::new(RwLock::new(self.context.blocking_read().clone())),
-            current_process: Arc::clone(&self.current_process),
+            current_pid: Arc::clone(&self.current_pid),
         }
     }
 }
@@ -140,6 +139,19 @@ pub async fn tool_set_working_dir(
     }
     let mut context = state.context.write().await;
     *context = ToolContext::new(working_dir);
+
+    // Automatically trigger CodeGraph indexing in the background
+    let state_clone = state.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        let registry = state_clone.registry.read().await;
+        let context = state_clone.context.read().await;
+        if let Some(tool) = registry.get("CodeGraph") {
+            let _ = tool.execute(serde_json::json!({
+                "action": "index"
+            }), &context).await;
+        }
+    });
+
     Ok(())
 }
 
@@ -211,21 +223,31 @@ pub async fn terminal_spawn(
     let working_dir = context.working_dir.clone();
 
     // Spawn process using default shell sh
-    let mut child = Command::new("sh")
-        .arg("-c")
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c")
         .arg(&command)
         .current_dir(&working_dir)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.as_std_mut().process_group(0);
+    }
+
+    let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to spawn process: {}", e))?;
 
     let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
+    let child_pid = child.id().ok_or("Failed to get process ID")?;
 
-    // Store child handle
-    let mut current_process = state.current_process.lock().await;
-    *current_process = Some(child);
+    // Store child PID
+    {
+        let mut current_pid = state.current_pid.lock().await;
+        *current_pid = Some(child_pid);
+    }
 
     // Read stdout line by line
     let app_clone = app.clone();
@@ -249,16 +271,13 @@ pub async fn terminal_spawn(
     let state_clone = state.inner().clone();
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        let mut current_process = state_clone.current_process.lock().await;
-        if let Some(mut child) = current_process.take() {
-            // Drop guard to avoid deadlocks
-            drop(current_process);
-            let status = child.wait().await;
-            let code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
-            let _ = app_clone.emit("terminal-exit", code);
-            
-            let mut current_process = state_clone.current_process.lock().await;
-            *current_process = None;
+        let status = child.wait().await;
+        let code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        let _ = app_clone.emit("terminal-exit", code);
+        
+        let mut current_pid = state_clone.current_pid.lock().await;
+        if *current_pid == Some(child_pid) {
+            *current_pid = None;
         }
     });
 
@@ -267,9 +286,26 @@ pub async fn terminal_spawn(
 
 #[tauri::command]
 pub async fn terminal_kill(state: tauri::State<'_, ToolState>) -> Result<(), String> {
-    let mut current_process = state.current_process.lock().await;
-    if let Some(mut child) = current_process.take() {
-        let _ = child.kill().await;
+    let mut current_pid = state.current_pid.lock().await;
+    if let Some(pid) = current_pid.take() {
+        #[cfg(unix)]
+        {
+            // Send SIGKILL to the process group (negative PID)
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(format!("-{}", pid))
+                .status();
+        }
+        #[cfg(windows)]
+        {
+            // taskkill /F /T /PID <pid> kills the process and its child processes
+            let _ = std::process::Command::new("taskkill")
+                .arg("/F")
+                .arg("/T")
+                .arg("/PID")
+                .arg(pid.to_string())
+                .status();
+        }
     }
     Ok(())
 }

@@ -14,6 +14,7 @@ pub mod web_fetch;
 pub mod diagnostic;
 pub mod task;
 pub mod backup;
+pub mod codegraph;
 
 pub use traits::Tool;
 pub use types::{ToolContext, ToolDefinition, ToolResult, RiskLevel};
