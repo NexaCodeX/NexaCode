@@ -16,9 +16,10 @@ interface AgentStepViewProps {
   step: AgentStep;
   stepIndex: number;
   isAgentRunning: boolean;
+  sessionId?: string;
 }
 
-export function AgentStepView({ step, stepIndex }: AgentStepViewProps) {
+export function AgentStepView({ step, stepIndex, sessionId }: AgentStepViewProps) {
   const [thinkingExpanded, setThinkingExpanded] = useState(true);
   const isRunning = step.status === 'thinking' || step.status === 'calling_tool' || step.status === 'tool_running';
 
@@ -63,6 +64,7 @@ export function AgentStepView({ step, stepIndex }: AgentStepViewProps) {
                 arguments={step.toolCall.arguments}
                 result={step.toolResult ? { output: step.toolResult.output, is_error: step.toolResult.is_error } : undefined}
                 showActions={false}
+                sessionId={sessionId}
               />
             ) : (
               <ToolCallView

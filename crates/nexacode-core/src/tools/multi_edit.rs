@@ -103,6 +103,12 @@ impl Tool for MultiEditTool {
         let mut written = Vec::new();
         for (path, content) in &modified_contents {
             let file_path = context.resolve_path(path);
+
+            // Backup file before edit
+            if let Err(e) = super::backup::backup_file(&file_path, context).await {
+                log::error!("[MultiEditTool] Backup failed for '{}': {}", path, e);
+            }
+
             match tokio::fs::write(&file_path, content).await {
                 Ok(_) => written.push(path.clone()),
                 Err(e) => {

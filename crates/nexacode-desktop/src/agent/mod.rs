@@ -1,11 +1,33 @@
 use nexacode_core::agent::{AgentConfig, AgentEvent, AgentLoop};
 use nexacode_core::session::SessionLogger;
+use nexacode_core::llm::Message;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::Emitter;
 
 use super::tools::ToolState;
 use super::llm::LLMManager;
+use std::sync::atomic::AtomicBool;
+
+pub struct AgentState {
+    pub is_cancelled: Arc<AtomicBool>,
+}
+
+impl Default for AgentState {
+    fn default() -> Self {
+        Self {
+            is_cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl Clone for AgentState {
+    fn clone(&self) -> Self {
+        Self {
+            is_cancelled: Arc::clone(&self.is_cancelled),
+        }
+    }
+}
 
 // ==========================================
 // Tauri command types
@@ -71,7 +93,8 @@ impl From<AgentEvent> for AgentEventInfo {
 #[derive(Debug, Deserialize)]
 pub struct AgentRunRequest {
     pub session_id: Option<String>,
-    pub message: String,
+    pub message: Option<String>,
+    pub messages: Option<Vec<super::llm::ChatMessage>>,
     pub model: String,
     pub system_prompt: Option<String>,
     pub max_iterations: Option<usize>,
@@ -91,10 +114,18 @@ pub async fn agent_run(
     app: tauri::AppHandle,
     llm_manager: tauri::State<'_, LLMManager>,
     tool_state: tauri::State<'_, ToolState>,
+    agent_state: tauri::State<'_, AgentState>,
     request: AgentRunRequest,
 ) -> Result<(), String> {
+    agent_state.is_cancelled.store(false, std::sync::atomic::Ordering::SeqCst);
+    let log_msg = request.messages.as_ref()
+        .and_then(|m| m.last().map(|msg| &msg.content))
+        .or(request.message.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
     log::info!("[agent_run] Called with message: {:?}, model: {:?}", 
-        &request.message[..request.message.len().min(80)],
+        &log_msg[..log_msg.len().min(80)],
         request.model
     );
 
@@ -111,7 +142,8 @@ pub async fn agent_run(
 
     // Get tool registry and context
     let registry = tool_state.registry.read().await.clone();
-    let context = tool_state.context.read().await.clone();
+    let mut context = tool_state.context.read().await.clone();
+    context.session_id = request.session_id.clone();
 
     log::info!("[agent_run] Registry has {} tools", registry.len());
 
@@ -133,18 +165,28 @@ pub async fn agent_run(
     // Create the agent loop
     let agent = AgentLoop::new(client, Arc::new(registry), Arc::new(context)).with_config(config);
 
-    let message = request.message;
     let model = request.model;
     let session_logger = request.session_id.map(|id| SessionLogger::new(&id));
 
+    // Construct message history
+    let history: Vec<Message> = if let Some(msgs) = request.messages {
+        msgs.into_iter()
+            .map(|m| Message::new(m.role.into(), nexacode_core::llm::MessageContent::text(m.content)))
+            .collect()
+    } else {
+        vec![Message::user(request.message.unwrap_or_default())]
+    };
+
+    let is_cancelled = Arc::clone(&agent_state.is_cancelled);
     // Spawn a background task that runs the agent and emits events AS THEY HAPPEN
     tokio::spawn(async move {
-        log::info!("[agent_run] Starting agent loop for message: {:?}, model: {:?}", 
-            &message[..message.len().min(80)],
+        log::info!("[agent_run] Starting agent loop with {} messages, model: {:?}", 
+            history.len(),
             model
         );
 
-        agent.run_streaming(&message, &model, |event| {
+        let is_cancelled_clone = Arc::clone(&is_cancelled);
+        agent.run_streaming(history, &model, |event| {
             let event_info: AgentEventInfo = event.into();
             log::info!("[agent_run] Emitting event: type={}", 
                 serde_json::to_string(&event_info)
@@ -153,7 +195,9 @@ pub async fn agent_run(
                     .unwrap_or_default()
             );
             let _ = app.emit("agent-event", &event_info);
-        }, session_logger).await;
+        }, session_logger, move || {
+            is_cancelled_clone.load(std::sync::atomic::Ordering::SeqCst)
+        }).await;
 
         log::info!("[agent_run] Agent loop finished, emitting agent-end");
 
@@ -161,6 +205,15 @@ pub async fn agent_run(
         let _ = app.emit("agent-end", ());
     });
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn agent_cancel(
+    agent_state: tauri::State<'_, AgentState>,
+) -> Result<(), String> {
+    log::info!("[agent_cancel] Set cancellation flag to true");
+    agent_state.is_cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 
@@ -200,3 +253,13 @@ pub async fn agent_step(
 
     serde_json::to_value(&result).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn agent_rollback(
+    tool_state: tauri::State<'_, ToolState>,
+    session_id: String,
+) -> Result<(), String> {
+    let context = tool_state.context.read().await.clone();
+    nexacode_core::tools::backup::rollback_session(&session_id, &context).await
+}
+

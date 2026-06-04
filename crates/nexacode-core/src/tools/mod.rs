@@ -13,6 +13,7 @@ pub mod multi_edit;
 pub mod web_fetch;
 pub mod diagnostic;
 pub mod task;
+pub mod backup;
 
 pub use traits::Tool;
 pub use types::{ToolContext, ToolDefinition, ToolResult, RiskLevel};

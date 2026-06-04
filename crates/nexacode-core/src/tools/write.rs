@@ -68,6 +68,11 @@ impl Tool for WriteTool {
         let content = args["content"].as_str().unwrap();
         let file_path = context.resolve_path(path);
 
+        // Backup file before write/overwrite
+        if let Err(e) = super::backup::backup_file(&file_path, context).await {
+            log::error!("[WriteTool] Backup failed: {}", e);
+        }
+
         // Create parent directories if needed
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {

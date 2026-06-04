@@ -79,6 +79,8 @@ pub struct ToolContext {
     pub max_output_bytes: u64,
     /// Timeout in seconds for commands
     pub timeout_secs: u64,
+    /// Current session ID for undo/backup tracking
+    pub session_id: Option<String>,
 }
 
 impl ToolContext {
@@ -87,6 +89,7 @@ impl ToolContext {
             working_dir: working_dir.into(),
             max_output_bytes: 50_000, // 50KB default
             timeout_secs: 120,
+            session_id: None,
         }
     }
 

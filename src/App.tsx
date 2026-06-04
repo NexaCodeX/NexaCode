@@ -8,6 +8,7 @@ import { LucideIcon } from './components/LucideIcon';
 import { Settings } from './components/Settings';
 import { MarkdownRenderer } from './components/MarkdownRenderer';
 import { AgentStepView } from './components/AgentStep';
+import { Terminal } from './components/Terminal';
 import { useLLM } from './hooks/useLLM';
 import { useAgent } from './hooks/useAgent';
 import type { ChatMessage } from './services/llm';
@@ -88,6 +89,10 @@ function stepToSessionData(s: AgentStep): SessionStepData {
   };
 }
 
+function hasEditSteps(steps: AgentStep[]): boolean {
+  return steps.some(step => step.toolCall && (step.toolCall.name === 'Edit' || step.toolCall.name === 'MultiEdit' || step.toolCall.name === 'Write'));
+}
+
 /** Convert a SessionStepData (from JSON) back to AgentStep (runtime) */
 function sessionDataToStep(s: SessionStepData): AgentStep {
   return {
@@ -123,6 +128,7 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>('build');
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
+  const [showTerminal, setShowTerminal] = useState<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -379,6 +385,49 @@ function App() {
     loadProviders();
   }, [loadProviders]);
 
+  const handleUndo = async () => {
+    if (!activeSessionId) return;
+    if (isAnyLoading || isAgentRunning) {
+      console.warn('[App] Cannot undo while agent is running');
+      return;
+    }
+
+    const confirmRollback = window.confirm(
+      'Are you sure you want to undo the changes made in this session? All files modified by the agent in this session will be reverted to their original state.'
+    );
+    if (!confirmRollback) return;
+
+    try {
+      console.log('[App] Invoking agent_rollback for session:', activeSessionId);
+      await invoke('agent_rollback', { sessionId: activeSessionId });
+      console.log('[App] agent_rollback completed successfully');
+
+      setMessages((prev) => {
+        if (prev.length < 2) {
+          saveCurrentSession(activeSessionId, []);
+          return [];
+        }
+
+        const last = prev[prev.length - 1];
+        const secondLast = prev[prev.length - 2];
+        let newMessages = [...prev];
+        if (last.role === 'assistant' && secondLast.role === 'user') {
+          newMessages = prev.slice(0, -2);
+        } else {
+          newMessages = prev.slice(0, -1);
+        }
+
+        saveCurrentSession(activeSessionId, newMessages);
+        return newMessages;
+      });
+
+      resetAgent();
+    } catch (e) {
+      console.error('[App] Failed to rollback session:', e);
+      window.alert('Failed to rollback session changes: ' + String(e));
+    }
+  };
+
   // ==========================================
   // Chat actions
   // ==========================================
@@ -391,6 +440,12 @@ function App() {
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isAnyLoading) return;
+
+    if (inputValue.trim() === '/undo') {
+      setInputValue('');
+      handleUndo();
+      return;
+    }
 
     if (!model) {
       console.error('[App] No model selected');
@@ -422,10 +477,15 @@ function App() {
     if (chatMode === 'build') {
       // Agent mode — run the agent loop
       console.log('[App] Running agent in build mode...');
+      const apiMessages: ChatMessage[] = newMessages.map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
+
       try {
         await agent.run({
           session_id: sessionId,
-          message: inputValue.trim(),
+          messages: apiMessages,
           model,
         });
         console.log('[App] Agent run completed');
@@ -681,6 +741,13 @@ function App() {
       {/* Main Content */}
       <main className="main-content">
         <div className="content-titlebar" data-tauri-drag-region />
+        <button
+          className={`terminal-toggle-btn-top ${showTerminal ? 'active' : ''}`}
+          onClick={() => setShowTerminal(!showTerminal)}
+          title="Toggle Terminal"
+        >
+          <LucideIcon name="panel-bottom" size={16} />
+        </button>
 
         <div className="content-body">
           {messages.length === 0 && !agent.isRunning && agent.steps.length === 0 ? (
@@ -781,12 +848,26 @@ function App() {
                                   step={step}
                                   stepIndex={sIdx}
                                   isAgentRunning={false}
+                                  sessionId={activeSessionId || undefined}
                                 />
                               ))}
                             </div>
                           )}
                           {/* Final text content */}
                           <MarkdownRenderer content={msg.content} />
+                          {idx === messages.length - 1 && msg.steps && hasEditSteps(msg.steps) && (
+                            <div className="agent-message-actions">
+                              <button
+                                type="button"
+                                className="agent-action-btn undo-btn"
+                                onClick={handleUndo}
+                                disabled={isAnyLoading}
+                              >
+                                <LucideIcon name="arrow-left" size={12} color="#EF4444" />
+                                <span>Undo Changes</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -810,6 +891,7 @@ function App() {
                                 step={step}
                                 stepIndex={idx}
                                 isAgentRunning={agent.isRunning}
+                                sessionId={activeSessionId || undefined}
                               />
                             ))}
                         </div>
@@ -940,6 +1022,13 @@ function App() {
                 </div>
               </div>
             </div>
+          )}
+          {showTerminal && (
+            <Terminal
+              currentFolder={currentFolder}
+              onFolderChange={setCurrentFolder}
+              onClose={() => setShowTerminal(false)}
+            />
           )}
         </div>
       </main>

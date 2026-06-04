@@ -46,6 +46,7 @@ export function useAgent() {
 
   // ✅ Use ref to track running state — avoids stale closure in event callbacks
   const isRunningRef = useRef(false);
+  const handleEventRef = useRef<((event: AgentEventInfo) => void) | null>(null);
 
   const nextStepId = useCallback(() => {
     stepCounterRef.current += 1;
@@ -101,6 +102,7 @@ export function useAgent() {
                 ...prev.slice(0, -1),
                 {
                   ...lastStep,
+                  id: stepId,
                   status: 'calling_tool',
                   toolCall: {
                     id: event.id,
@@ -208,6 +210,9 @@ export function useAgent() {
     [nextStepId, steps],
   );
 
+  // Keep ref up to date with the latest handleEvent function
+  handleEventRef.current = handleEvent;
+
   /** Run the agent loop */
   const run = useCallback(
     async (request: AgentRunRequest) => {
@@ -220,7 +225,9 @@ export function useAgent() {
           request,
           (event: AgentEventInfo) => {
             if (!isRunningRef.current) return;
-            handleEvent(event);
+            if (handleEventRef.current) {
+              handleEventRef.current(event);
+            }
           },
           () => {
             isRunningRef.current = false;
@@ -230,7 +237,7 @@ export function useAgent() {
         );
       });
     },
-    [reset, handleEvent],
+    [reset],
   );
 
   /** Stop the agent */

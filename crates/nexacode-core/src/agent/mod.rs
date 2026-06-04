@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use futures::StreamExt;
 
-use crate::llm::types::{ChatOptions, Message};
+use crate::llm::types::{ChatOptions, Message, Role};
 use crate::llm::LLMClient;
 use crate::session::SessionLogger;
 use crate::tools::{ToolContext, ToolRegistry, ToolResult};
@@ -136,7 +136,7 @@ impl AgentLoop {
     /// The caller can process these events to update the UI, log activity, etc.
     pub async fn run(
         &self,
-        user_message: &str,
+        history: Vec<Message>,
         model: &str,
     ) -> Vec<AgentEvent> {
         let mut events = Vec::new();
@@ -144,13 +144,16 @@ impl AgentLoop {
         // Build initial message list
         let mut messages = Vec::new();
 
-        // Add system prompt
+        // Add system prompt if configured and the history doesn't already start with a system message
         if let Some(prompt) = &self.config.system_prompt {
-            messages.push(Message::system(prompt));
+            let has_system = history.first().map(|m| m.role == Role::System).unwrap_or(false);
+            if !has_system {
+                messages.push(Message::system(prompt));
+            }
         }
 
-        // Add user message
-        messages.push(Message::user(user_message));
+        // Add history
+        messages.extend(history);
 
         // Get tool definitions
         let tool_definitions = self.registry.definitions();
@@ -274,19 +277,29 @@ impl AgentLoop {
     ///
     /// If a `SessionLogger` is provided, every LLM request and response is
     /// appended to `~/.nexacode/logs/{session_id}.log` for debugging.
-    pub async fn run_streaming<F>(
+    pub async fn run_streaming<F, C>(
         &self,
-        user_message: &str,
+        history: Vec<Message>,
         model: &str,
         mut on_event: F,
         logger: Option<SessionLogger>,
+        is_cancelled: C,
     ) where
         F: FnMut(AgentEvent),
+        C: Fn() -> bool,
     {
         // Minimum delay between consecutive events sent to the frontend.
         // 50 ms is a good balance: fast enough to feel responsive, slow enough
         // for the browser to paint each update individually.
         let event_delay = std::time::Duration::from_millis(50);
+
+        // Find the last user message to log the run start
+        let user_message = history
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::User)
+            .and_then(|m| m.text_content())
+            .unwrap_or("");
 
         // Log the start of this agent run
         if let Some(ref l) = logger {
@@ -296,13 +309,16 @@ impl AgentLoop {
         // Build initial message list
         let mut messages = Vec::new();
 
-        // Add system prompt
+        // Add system prompt if configured and history doesn't already start with a system message
         if let Some(prompt) = &self.config.system_prompt {
-            messages.push(Message::system(prompt));
+            let has_system = history.first().map(|m| m.role == Role::System).unwrap_or(false);
+            if !has_system {
+                messages.push(Message::system(prompt));
+            }
         }
 
-        // Add user message
-        messages.push(Message::user(user_message));
+        // Add history
+        messages.extend(history);
 
         // Get tool definitions
         let tool_definitions = self.registry.definitions();
@@ -318,6 +334,10 @@ impl AgentLoop {
 
         // Agent Loop: Think → Act → Observe → ...
         for iteration in 0..self.config.max_iterations {
+            if is_cancelled() {
+                log::info!("[Agent] Loop cancelled before iteration {}", iteration + 1);
+                return;
+            }
             log::info!(
                 "[Agent] Loop iteration {}/{}",
                 iteration + 1,
@@ -350,6 +370,10 @@ impl AgentLoop {
                 std::collections::BTreeMap::new();
 
             while let Some(chunk_result) = stream.next().await {
+                if is_cancelled() {
+                    log::info!("[Agent] Loop cancelled during chunk streaming");
+                    return;
+                }
                 match chunk_result {
                     Ok(chunk) => {
                         // 1. Handle text content (thinking/reasoning delta)
@@ -447,6 +471,10 @@ impl AgentLoop {
 
             // Execute each tool call
             for tc in &tool_calls {
+                if is_cancelled() {
+                    log::info!("[Agent] Loop cancelled before executing tool: {}", tc.name);
+                    return;
+                }
                 // Check if confirmation is required
                 let requires_confirmation = self.registry.requires_confirmation(&tc.name, &tc.arguments);
 
@@ -892,7 +920,7 @@ mod tests {
             stop_reason: Some("stop".to_string()),
         }]);
 
-        let events = agent.run("Hi there", "mock-model").await;
+        let events = agent.run(vec![Message::user("Hi there")], "mock-model").await;
 
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -929,7 +957,7 @@ mod tests {
             },
         ]);
 
-        let events = agent.run("Read the file", "mock-model").await;
+        let events = agent.run(vec![Message::user("Read the file")], "mock-model").await;
 
         // Should have: Thinking, ToolCall, ToolResult, Completed
         assert!(events.len() >= 3);
@@ -976,7 +1004,7 @@ mod tests {
         let agent = create_test_agent(vec![infinite_tool_call; 10])
             .with_config(AgentConfig::new().with_max_iterations(3));
 
-        let events = agent.run("Keep going", "mock-model").await;
+        let events = agent.run(vec![Message::user("Keep going")], "mock-model").await;
 
         // Should have: 3x (ToolCall + ToolResult) + MaxIterationsReached
         let tool_call_count = events.iter().filter(|e| matches!(e, AgentEvent::ToolCall { .. })).count();
@@ -1085,7 +1113,7 @@ mod tests {
         }])
         .with_config(AgentConfig::new().with_system_prompt("You are a coding assistant"));
 
-        let events = agent.run("Hello", "mock-model").await;
+        let events = agent.run(vec![Message::user("Hello")], "mock-model").await;
         match &events[0] {
             AgentEvent::Completed { content } => {
                 assert_eq!(content, "System prompt was set");
@@ -1117,7 +1145,7 @@ mod tests {
             },
         ]);
 
-        let events = agent.run("Run two commands", "mock-model").await;
+        let events = agent.run(vec![Message::user("Run two commands")], "mock-model").await;
 
         let tool_call_count = events.iter().filter(|e| matches!(e, AgentEvent::ToolCall { .. })).count();
         assert_eq!(tool_call_count, 2);

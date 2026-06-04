@@ -98,6 +98,11 @@ impl Tool for EditTool {
         let file_path = context.resolve_path(&path);
         if !file_path.exists() { return ToolResult::error(format!("File not found: {}", path)); }
 
+        // Backup file before edit
+        if let Err(e) = super::backup::backup_file(&file_path, context).await {
+            log::error!("[EditTool] Backup failed: {}", e);
+        }
+
         let content = match tokio::fs::read_to_string(&file_path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read file: {}", e)),

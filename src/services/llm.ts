@@ -215,7 +215,8 @@ export type AgentEventInfo =
 
 export interface AgentRunRequest {
   session_id?: string;
-  message: string;
+  message?: string;
+  messages?: ChatMessage[];
   model: string;
   system_prompt?: string;
   max_iterations?: number;
@@ -273,9 +274,14 @@ export class AgentService {
     }
   }
 
-  /** Cancel any running agent listeners */
-  static cancel(): void {
+  /** Cancel any running agent execution and listeners */
+  static async cancel(): Promise<void> {
     console.log('[AgentService] cancel() called');
     clearAgentListeners();
+    try {
+      await invoke('agent_cancel');
+    } catch (err) {
+      console.error('[AgentService] Failed to cancel agent on backend:', err);
+    }
   }
 }

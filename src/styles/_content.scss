@@ -51,6 +51,7 @@
 // Welcome Area
 .welcome-area {
   flex: 1;
+  min-height: 0;
   @include flex-column-center;
   gap: $spacing-md;
   padding: 0 80px;
@@ -293,6 +294,37 @@
   padding: $spacing-standard 18px;
   background: $bg-elevated;
   border-top: 1px solid $border-subtle;
+}
+
+.terminal-toggle-btn-top {
+  position: absolute;
+  top: 5px;
+  right: 16px;
+  z-index: 1000;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  @include flex-center;
+  cursor: pointer;
+  transition: all $transition-base;
+  color: $text-secondary;
+
+  &:hover {
+    background: $bg-muted;
+    color: $text-primary;
+  }
+
+  &.active {
+    background: $accent-primary-light;
+    border-color: rgba($accent-primary, 0.2);
+    color: $accent-primary;
+
+    &:hover {
+      background: rgba($accent-primary, 0.15);
+    }
+  }
 }
 
 .options-left {

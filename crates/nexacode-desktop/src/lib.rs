@@ -11,12 +11,15 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    init_shell_env();
     let llm_manager = llm::LLMManager::new();
     let tool_state = tools::ToolState::default();
+    let agent_state = agent::AgentState::default();
 
     tauri::Builder::default()
         .manage(llm_manager)
         .manage(tool_state)
+        .manage(agent_state)
         .invoke_handler(tauri::generate_handler![
             greet,
             // LLM commands
@@ -44,9 +47,15 @@ pub fn run() {
             tools::tool_set_working_dir,
             tools::tool_get_working_dir,
             tools::select_directory,
+            tools::read_file_raw,
+            tools::read_file_backup,
+            tools::terminal_spawn,
+            tools::terminal_kill,
             // Agent commands
             agent::agent_run,
-            agent::agent_step
+            agent::agent_step,
+            agent::agent_rollback,
+            agent::agent_cancel
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -69,3 +78,31 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(target_os = "macos")]
+fn init_shell_env() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    if let Ok(output) = std::process::Command::new(shell)
+        .arg("-l")
+        .arg("-c")
+        .arg("env")
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if let Some(pos) = line.find('=') {
+                    let key = &line[..pos];
+                    let val = &line[pos + 1..];
+                    if key == "PATH" {
+                        std::env::set_var("PATH", val);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn init_shell_env() {}
