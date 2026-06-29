@@ -46,6 +46,11 @@
   @include flex-column;
   padding: 0 $spacing-section $spacing-section;
   overflow: hidden;
+
+  // 当 chat-area 存在时，去掉右侧 padding 让滚动条贴边
+  &:has(.chat-area) {
+    padding-right: 0;
+  }
 }
 
 // Welcome Area

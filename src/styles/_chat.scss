@@ -536,8 +536,7 @@
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: $spacing-section;
-  padding-bottom: $spacing-md;
+  padding: $spacing-section 0 $spacing-md $spacing-section;
 
   // Scrollbar: hidden when idle, visible on hover/scroll
   &::-webkit-scrollbar {
@@ -573,6 +572,7 @@
 
 .message {
   margin-bottom: $spacing-lg;
+  padding-right: $spacing-section;
 
   &.user {
     display: flex;
