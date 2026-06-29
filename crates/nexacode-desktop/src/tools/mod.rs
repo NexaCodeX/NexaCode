@@ -31,7 +31,7 @@ impl Clone for ToolState {
     fn clone(&self) -> Self {
         Self {
             registry: Arc::clone(&self.registry),
-            context: Arc::new(RwLock::new(self.context.blocking_read().clone())),
+            context: Arc::clone(&self.context),
             current_pid: Arc::clone(&self.current_pid),
         }
     }

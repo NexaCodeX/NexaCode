@@ -539,7 +539,7 @@
   padding: $spacing-section;
   padding-bottom: $spacing-md;
 
-  // Scrollbar
+  // Scrollbar: hidden when idle, visible on hover/scroll
   &::-webkit-scrollbar {
     width: 6px;
   }
@@ -549,12 +549,25 @@
   }
 
   &::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.08);
+    background: transparent;
     border-radius: 6px;
+    transition: background 0.3s ease;
+  }
+
+  &:hover::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.08);
 
     &:hover {
       background: rgba(0, 0, 0, 0.15);
     }
+  }
+
+  // Firefox: thin scrollbar, hidden until hovered
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  &:hover {
+    scrollbar-color: rgba(0, 0, 0, 0.08) transparent;
   }
 }
 
@@ -641,6 +654,49 @@
 
 .message.assistant .message-body {
   // No bubble for assistant - markdown renders directly
+}
+
+// Copy action row (user + assistant messages) — revealed on message hover
+.user-message-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.message-actions {
+  display: flex;
+  gap: $spacing-xs;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity $transition-fast;
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+}
+
+.copy-msg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: $text-tertiary;
+  transition: background $transition-fast, color $transition-fast;
+
+  &:hover {
+    background: $bg-muted;
+    color: $text-secondary;
+  }
+
+  &.copied {
+    color: $accent-primary;
+  }
 }
 
 // Streaming cursor - blinking caret effect like Cursor

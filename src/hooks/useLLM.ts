@@ -13,6 +13,7 @@ export function useLLM() {
 
   // Flag to track if stream was cancelled — ignore late-arriving chunks
   const cancelledRef = useRef(false);
+  const resolveRef = useRef<(() => void) | null>(null);
 
   // Flush buffer to state via requestAnimationFrame
   const flushBuffer = useCallback(() => {
@@ -72,6 +73,7 @@ export function useLLM() {
       cancelledRef.current = false;
 
       return new Promise((resolve) => {
+        resolveRef.current = resolve;
         LLMService.chatStream(
           messages,
           model,
@@ -91,6 +93,7 @@ export function useLLM() {
             setStreamingContent(bufferRef.current);
             setError(err);
             setIsLoading(false);
+            resolveRef.current = null;
             resolve();
           },
           () => {
@@ -101,6 +104,7 @@ export function useLLM() {
             }
             setStreamingContent(bufferRef.current);
             setIsLoading(false);
+            resolveRef.current = null;
             resolve();
           },
           options
@@ -214,9 +218,6 @@ export function useLLM() {
     // Mark as cancelled immediately — this prevents late-arriving chunks from being processed
     cancelledRef.current = true;
 
-    // Tell the backend to cancel the stream
-    await LLMService.cancelStream();
-
     // Flush any remaining buffer that was already received
     if (rafIdRef.current !== null) {
       cancelAnimationFrame(rafIdRef.current);
@@ -224,6 +225,18 @@ export function useLLM() {
     }
     setStreamingContent(bufferRef.current);
     setIsLoading(false);
+
+    if (resolveRef.current) {
+      resolveRef.current();
+      resolveRef.current = null;
+    }
+
+    // Tell the backend to cancel the stream (non-blocking in the UI)
+    try {
+      await LLMService.cancelStream();
+    } catch (err) {
+      console.error('Failed to cancel stream on backend:', err);
+    }
   }, []);
 
   return {

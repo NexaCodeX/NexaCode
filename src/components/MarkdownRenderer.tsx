@@ -140,7 +140,7 @@ interface MarkdownRendererProps {
   disableThinkingWrapper?: boolean;
 }
 
-const parseThinking = (text: string) => {
+export const parseThinking = (text: string) => {
   let thinking = '';
   let main = '';
   let remaining = text;

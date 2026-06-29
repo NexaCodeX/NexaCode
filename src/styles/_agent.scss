@@ -105,6 +105,18 @@
   }
 }
 
+// Narration / user-facing prose emitted before a tool call
+.agent-step-text {
+  margin-bottom: $spacing-sm;
+  font-size: 13px;
+  color: $text-primary;
+  line-height: 1.6;
+
+  .markdown-content {
+    font-size: 13px;
+  }
+}
+
 // ==========================================
 // Tool Call View Styles
 // ==========================================

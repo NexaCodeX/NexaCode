@@ -10,6 +10,7 @@ import { MarkdownRenderer } from './components/MarkdownRenderer';
 import { AgentStepView } from './components/AgentStep';
 import { Terminal } from './components/Terminal';
 import { CodeGraphView } from './components/CodeGraphView';
+import { CopyButton } from './components/CopyButton';
 import { useLLM } from './hooks/useLLM';
 import { useAgent } from './hooks/useAgent';
 import type { ChatMessage } from './services/llm';
@@ -119,6 +120,10 @@ function App() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
+  const runningSessionMessagesRef = useRef<Message[]>([]);
+  const wasLoadingRef = useRef(false);
+  const wasAgentRunningRef = useRef(false);
   const [inputValue, setInputValue] = useState('');
   const [model, setModel] = useState('');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -171,6 +176,7 @@ function App() {
 
   // Combined loading state
   const isAnyLoading = isLoading || agent.isRunning;
+  const isActiveSessionLoading = isAnyLoading && runningSessionId === activeSessionId;
 
   // ==========================================
   // Session persistence
@@ -221,7 +227,10 @@ function App() {
         setChatMode('build');
       }
 
-      agent.reset();
+      // Only reset agent if this session is NOT the one currently running
+      if (sessionId !== runningSessionId && !agent.isRunning) {
+        agent.reset();
+      }
     } catch (e) {
       console.error('Failed to load session:', e);
     }
@@ -315,53 +324,50 @@ function App() {
 
   // When streaming completes (Chat mode), add assistant message to messages and save
   useEffect(() => {
-    if (streamingContent && !isLoading) {
-      setMessages((prev) => {
-        const lastMessage = prev[prev.length - 1];
-
-        const newMessage: Message = {
+    if (wasLoadingRef.current && !isLoading && runningSessionId) {
+      if (streamingContent) {
+        const assistantMsg: Message = {
           role: 'assistant',
           content: streamingContent,
         };
 
-        let newMessages: Message[];
-        if (lastMessage?.role === 'assistant') {
-          newMessages = [...prev.slice(0, -1), newMessage];
-        } else {
-          newMessages = [...prev, newMessage];
-        }
+        const finalMessages = [...runningSessionMessagesRef.current, assistantMsg];
+        saveCurrentSession(runningSessionId, finalMessages);
 
-        if (activeSessionId) {
-          saveCurrentSession(activeSessionId, newMessages);
+        if (runningSessionId === activeSessionId) {
+          setMessages(finalMessages);
         }
-
-        return newMessages;
-      });
+      }
+      setRunningSessionId(null);
     }
-  }, [streamingContent, isLoading, activeSessionId, saveCurrentSession]);
+    wasLoadingRef.current = isLoading;
+  }, [streamingContent, isLoading, runningSessionId, activeSessionId, saveCurrentSession]);
 
   // When agent completes, create a single assistant message with steps + final content
   const { isRunning: isAgentRunning, finalResponse: agentFinalResponse, steps: agentSteps, reset: resetAgent } = agent;
   useEffect(() => {
-    if (!isAgentRunning && agentFinalResponse && activeSessionId) {
-      const content = agentFinalResponse.content;
-
-      setMessages((prev) => {
-        // Build the assistant message with embedded steps
+    if (wasAgentRunningRef.current && !isAgentRunning && runningSessionId) {
+      // If there was a final response or we have generated some steps, save the session
+      if (agentFinalResponse || agentSteps.length > 0) {
         const assistantMsg: Message = {
           role: 'assistant',
-          content,
+          content: agentFinalResponse?.content || 'Agent execution stopped.',
           steps: agentSteps.length > 0 ? agentSteps : undefined,
         };
 
-        const newMessages = [...prev, assistantMsg];
-        saveCurrentSession(activeSessionId, newMessages);
-        return newMessages;
-      });
+        const finalMessages = [...runningSessionMessagesRef.current, assistantMsg];
+        saveCurrentSession(runningSessionId, finalMessages);
+
+        if (runningSessionId === activeSessionId) {
+          setMessages(finalMessages);
+        }
+      }
 
       resetAgent();
+      setRunningSessionId(null);
     }
-  }, [isAgentRunning, agentFinalResponse, activeSessionId, saveCurrentSession, agentSteps, resetAgent]);
+    wasAgentRunningRef.current = isAgentRunning;
+  }, [isAgentRunning, agentFinalResponse, runningSessionId, activeSessionId, saveCurrentSession, agentSteps, resetAgent]);
 
   // ==========================================
   // Provider loading
@@ -441,7 +447,7 @@ function App() {
   };
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isAnyLoading) return;
+    if (!inputValue.trim() || isActiveSessionLoading) return;
 
     if (inputValue.trim() === '/undo') {
       setInputValue('');
@@ -457,6 +463,11 @@ function App() {
     console.log('[App] handleSendMessage called, chatMode:', chatMode, 'model:', model);
 
     isAtBottomRef.current = true;
+
+    if (isAnyLoading) {
+      console.log('[App] Stopping background session run before starting new one');
+      await handleStop();
+    }
 
     const userMessage: Message = { role: 'user', content: inputValue.trim() };
     const newMessages = [...messages, userMessage];
@@ -475,6 +486,9 @@ function App() {
       ? inputValue.trim().slice(0, 30) + (inputValue.trim().length > 30 ? '...' : '')
       : undefined;
     saveCurrentSession(sessionId, newMessages, title);
+
+    setRunningSessionId(sessionId);
+    runningSessionMessagesRef.current = newMessages;
 
     if (chatMode === 'build') {
       // Agent mode — run the agent loop
@@ -511,12 +525,12 @@ function App() {
     }
   };
 
-  const handleStop = () => {
+  const handleStop = async () => {
     if (agent.isRunning) {
-      agent.stop();
+      await agent.stop();
     }
     if (isLoading) {
-      cancelStream();
+      await cancelStream();
     }
   };
 
@@ -561,7 +575,9 @@ function App() {
   const handleNewChat = () => {
     setActiveSessionId(null);
     setMessages([]);
-    agent.reset();
+    if (!agent.isRunning) {
+      agent.reset();
+    }
   };
 
   const handleSelectSession = async (sessionId: string) => {
@@ -576,6 +592,10 @@ function App() {
       if (activeSessionId === sessionId) {
         setActiveSessionId(null);
         setMessages([]);
+      }
+      if (runningSessionId === sessionId) {
+        await handleStop();
+        setRunningSessionId(null);
       }
       await refreshSessions();
     } catch (err) {
@@ -663,7 +683,7 @@ function App() {
           </button>
         </>
       )}
-      {isAnyLoading ? (
+      {isActiveSessionLoading ? (
         <button className="stop-btn" onClick={handleStop}>
           <LucideIcon name="square" size={16} color="#FFFFFF" />
         </button>
@@ -773,7 +793,7 @@ function App() {
         </div>
 
         <div className="content-body">
-          {messages.length === 0 && !agent.isRunning && agent.steps.length === 0 ? (
+          {messages.length === 0 && !isActiveSessionLoading ? (
             <div className="welcome-area">
               <div className="welcome-icon">
                 <LucideIcon name="sparkles" size={36} color="var(--accent-primary)" />
@@ -800,7 +820,7 @@ function App() {
                     onKeyDown={handleKeyDown}
                     onCompositionStart={handleCompositionStart}
                     onCompositionEnd={handleCompositionEnd}
-                    disabled={isAnyLoading}
+                    disabled={isActiveSessionLoading}
                   />
                   <div className="input-actions">
                     <button className="attachment-btn">
@@ -848,8 +868,13 @@ function App() {
                     {msg.role === 'user' ? (
                       <div className="message-row user-row">
                         <div className="message-body user-body">
-                          <div className="message-content">
-                            {msg.content}
+                          <div className="user-message-wrap">
+                            <div className="message-content">
+                              {msg.content}
+                            </div>
+                            <div className="message-actions user-actions">
+                              <CopyButton text={msg.content} />
+                            </div>
                           </div>
                         </div>
                         <div className="message-avatar user-avatar">
@@ -878,6 +903,11 @@ function App() {
                           )}
                           {/* Final text content */}
                           <MarkdownRenderer content={msg.content} />
+                          {msg.content && (
+                            <div className="message-actions assistant-actions">
+                              <CopyButton text={msg.content} />
+                            </div>
+                          )}
                           {idx === messages.length - 1 && msg.steps && hasEditSteps(msg.steps) && (
                             <div className="agent-message-actions">
                               <button
@@ -898,7 +928,7 @@ function App() {
                 ))}
 
                 {/* Live agent steps (while agent is running or final response is not yet committed) */}
-                {(isAgentRunning || agentFinalResponse) && chatMode === 'build' && (
+                {(isAgentRunning || agentFinalResponse) && chatMode === 'build' && runningSessionId === activeSessionId && (
                   <div className="message assistant agent">
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
@@ -953,7 +983,7 @@ function App() {
                 )}
 
                 {/* Streaming content (chat mode) — render while loading or if not yet appended to messages list */}
-                {streamingContent && chatMode === 'chat' && (isLoading || messages[messages.length - 1]?.content !== streamingContent) && (
+                {streamingContent && chatMode === 'chat' && runningSessionId === activeSessionId && (isLoading || messages[messages.length - 1]?.content !== streamingContent) && (
                   <div className={`message assistant ${isLoading ? 'streaming' : ''}`}>
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
@@ -968,7 +998,7 @@ function App() {
                 )}
 
                 {/* Thinking indicator (chat mode) */}
-                {isLoading && !streamingContent && chatMode === 'chat' && (
+                {isLoading && !streamingContent && chatMode === 'chat' && runningSessionId === activeSessionId && (
                   <div className="message assistant loading">
                     <div className="message-row assistant-row">
                       <div className="message-avatar assistant-avatar">
@@ -1010,7 +1040,7 @@ function App() {
                     onKeyDown={handleKeyDown}
                     onCompositionStart={handleCompositionStart}
                     onCompositionEnd={handleCompositionEnd}
-                    disabled={isAnyLoading}
+                    disabled={isActiveSessionLoading}
                   />
                   <div className="input-actions">
                     <button className="attachment-btn">

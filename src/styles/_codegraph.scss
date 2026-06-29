@@ -1,0 +1,331 @@
+@use 'variables' as *;
+@use 'mixins' as *;
+
+.codegraph-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.codegraph-searchbar {
+  height: 42px;
+  border-bottom: 1px solid #2D2C2A;
+  background: #1C1C1A;
+  display: flex;
+  align-items: center;
+  padding: 0 $spacing-md;
+  gap: $spacing-sm;
+
+  .codegraph-search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: $font-family;
+    font-size: $font-size-sm;
+    color: #ECEBE9;
+    
+    &::placeholder {
+      color: #5D5C5A;
+    }
+  }
+}
+
+.codegraph-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: #141412;
+}
+
+/* Left Sidebar Tree */
+.codegraph-tree-container {
+  width: 45%;
+  border-right: 1px solid #2D2C2A;
+  overflow-y: auto;
+  padding: $spacing-sm;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #2D2C2A;
+    border-radius: 3px;
+  }
+}
+
+/* Truncation utility used across the explorer (name/path labels) */
+.truncate {
+  @include text-truncate;
+}
+
+.codegraph-node-name {
+  flex: 1;
+  min-width: 0;
+  @include text-truncate;
+}
+
+.codegraph-tree-file-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.codegraph-file-header {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 $spacing-xs;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: $font-size-xs;
+  color: #ECEBE9;
+  
+  &:hover {
+    background: #252422;
+  }
+  
+  &.active {
+    background: rgba($accent-primary, 0.1);
+    color: $accent-primary;
+  }
+}
+
+.codegraph-expand-btn {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  @include flex-center;
+  cursor: pointer;
+  border-radius: 4px;
+  
+  &:hover {
+    background: #3D3C3A;
+  }
+}
+
+.codegraph-file-children {
+  display: flex;
+  flex-direction: column;
+  padding-left: 20px;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.codegraph-symbol-node {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: 0 $spacing-xs;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: $font-size-xs;
+  color: #CCCBCA;
+  position: relative;
+  
+  &:hover {
+    background: #22211F;
+    color: #ECEBE9;
+  }
+  
+  &.active {
+    background: rgba($accent-primary, 0.15);
+    color: $accent-primary;
+  }
+
+  .codegraph-node-name {
+    padding-right: 38px; // reserve room for the absolutely-positioned line label
+  }
+
+  .codegraph-node-line {
+    position: absolute;
+    right: $spacing-xs;
+    font-size: 10px;
+    color: #5D5C5A;
+  }
+}
+
+.codegraph-kind-badge {
+  font-size: 9px;
+  font-weight: $font-weight-bold;
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  @include flex-center;
+  font-family: $font-family;
+}
+
+/* Right Details Panel */
+.codegraph-details-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: $spacing-md;
+  
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: #2D2C2A;
+    border-radius: 3px;
+  }
+}
+
+.codegraph-empty-state {
+  height: 100%;
+  @include flex-center;
+  flex-direction: column;
+  gap: $spacing-sm;
+  text-align: center;
+  color: #5D5C5A;
+  font-size: $font-size-sm;
+  font-family: $font-family;
+  padding: $spacing-lg;
+}
+
+.codegraph-loading {
+  color: #8D8C8A;
+
+  .codegraph-loading-spinner {
+    @include flex-center;
+    animation: rotate-spinner 1s linear infinite;
+  }
+}
+
+/* Dimmed directory prefix shown before the file basename in the tree */
+.codegraph-node-dir {
+  color: #5D5C5A;
+}
+
+.codegraph-details {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.codegraph-details-header {
+  border-bottom: 1px solid #2D2C2A;
+  padding-bottom: $spacing-sm;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  
+  .codegraph-kind-tag {
+    font-size: 10px;
+    font-weight: $font-weight-bold;
+    text-transform: uppercase;
+    align-self: flex-start;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+  
+  .codegraph-details-title {
+    font-size: $font-size-base;
+    font-weight: $font-weight-bold;
+    color: #ECEBE9;
+    margin: 0;
+  }
+  
+  .codegraph-details-subtitle {
+    font-size: $font-size-xs;
+    color: #8D8C8A;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    margin: 0;
+  }
+}
+
+.codegraph-details-relations {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.codegraph-relation-section {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  
+  .codegraph-relation-title {
+    font-size: $font-size-xs;
+    font-weight: $font-weight-bold;
+    color: #8D8C8A;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 4px 0;
+  }
+  
+  .codegraph-relation-empty {
+    font-size: $font-size-xs;
+    color: #5D5C5A;
+    margin: 0;
+  }
+}
+
+.codegraph-relation-item {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: 0 $spacing-xs;
+  border-radius: 4px;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: $font-size-xs;
+  color: #CCCBCA;
+  
+  &.link {
+    cursor: pointer;
+    
+    &:hover {
+      background: #1C1C1A;
+      color: #ECEBE9;
+      
+      .relation-symbol-name {
+        text-decoration: underline;
+      }
+    }
+  }
+  
+  .relation-symbol-name {
+    color: #ECEBE9;
+    font-weight: $font-weight-medium;
+  }
+  
+  .relation-symbol-path {
+    color: #5D5C5A;
+  }
+}
+
+.indexing-msg-text {
+  font-size: 11px;
+  color: $accent-primary;
+  margin-right: $spacing-xs;
+}
+
+.indexing-active {
+  animation: rotate-spinner 1s linear infinite;
+  
+  .icon {
+    color: $accent-primary !important;
+  }
+}
+
+@keyframes rotate-spinner {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

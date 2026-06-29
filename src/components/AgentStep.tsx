@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { LucideIcon } from './LucideIcon';
 import { ToolCallView } from './ToolCallView';
 import { DiffPreview } from './DiffPreview';
-import { MarkdownRenderer } from './MarkdownRenderer';
+import { MarkdownRenderer, parseThinking } from './MarkdownRenderer';
 import type { AgentStep } from '../hooks/useAgent';
 
 /** Check if a tool call involves file editing (should show diff preview) */
@@ -23,6 +23,14 @@ export function AgentStepView({ step, stepIndex, sessionId }: AgentStepViewProps
   const [thinkingExpanded, setThinkingExpanded] = useState(true);
   const isRunning = step.status === 'thinking' || step.status === 'calling_tool' || step.status === 'tool_running';
 
+  // The agent stream lumps real reasoning ([THINKING]...[/THINKING]) and the
+  // model's user-facing narration into a single `thinking` field. Split them so
+  // only the reasoning lives in the collapsible block and the narration renders
+  // as normal visible prose.
+  const { thinkingContent, mainContent } = step.thinking
+    ? parseThinking(step.thinking)
+    : { thinkingContent: '', mainContent: '' };
+
   return (
     <div className={`agent-step ${isRunning ? 'running' : ''} ${step.toolResult?.is_error ? 'error' : ''}`}>
       {/* Step number indicator */}
@@ -32,8 +40,8 @@ export function AgentStepView({ step, stepIndex, sessionId }: AgentStepViewProps
 
       {/* Step content */}
       <div className="agent-step-content">
-        {/* Thinking block */}
-        {step.thinking && (
+        {/* Thinking block — only the actual reasoning ([THINKING] content) */}
+        {thinkingContent && (
           <div className={`agent-thinking ${thinkingExpanded ? 'open' : ''}`}>
             <button
               className="agent-thinking-header"
@@ -49,9 +57,16 @@ export function AgentStepView({ step, stepIndex, sessionId }: AgentStepViewProps
             </button>
             {thinkingExpanded && (
               <div className="agent-thinking-body">
-                <MarkdownRenderer content={step.thinking} disableThinkingWrapper={true} />
+                <MarkdownRenderer content={thinkingContent} disableThinkingWrapper={true} />
               </div>
             )}
+          </div>
+        )}
+
+        {/* Narration / user-facing prose the model emitted before this step */}
+        {mainContent && (
+          <div className="agent-step-text">
+            <MarkdownRenderer content={mainContent} disableThinkingWrapper={true} />
           </div>
         )}
 

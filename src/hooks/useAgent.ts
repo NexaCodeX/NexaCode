@@ -43,6 +43,7 @@ export function useAgent() {
   // Track step IDs for linking tool results to tool calls
   const stepCounterRef = useRef(0);
   const toolCallToStepMap = useRef<Map<string, string>>(new Map());
+  const resolveRef = useRef<(() => void) | null>(null);
 
   // ✅ Use ref to track running state — avoids stale closure in event callbacks
   const isRunningRef = useRef(false);
@@ -221,6 +222,7 @@ export function useAgent() {
       setIsRunning(true);
 
       return new Promise<void>((resolve) => {
+        resolveRef.current = resolve;
         AgentService.run(
           request,
           (event: AgentEventInfo) => {
@@ -232,6 +234,7 @@ export function useAgent() {
           () => {
             isRunningRef.current = false;
             setIsRunning(false);
+            resolveRef.current = null;
             resolve();
           },
         );
@@ -241,10 +244,50 @@ export function useAgent() {
   );
 
   /** Stop the agent */
-  const stop = useCallback(() => {
+  const stop = useCallback(async () => {
     isRunningRef.current = false;
     setIsRunning(false);
-    AgentService.cancel();
+
+    // Map any running/thinking steps to a finished state so they don't show as loading in history
+    setSteps((prev) => {
+      const updated = prev.map((step) => {
+        if (step.status === 'thinking') {
+          return { ...step, status: 'done' as const };
+        } else if (step.status === 'calling_tool' || step.status === 'tool_running') {
+          return {
+            ...step,
+            status: 'error' as const,
+            toolResult: step.toolResult || {
+              tool_call_id: step.toolCall?.id || 'unknown',
+              name: step.toolCall?.name || 'unknown',
+              output: 'Cancelled by user',
+              is_error: true,
+            },
+          };
+        }
+        return step;
+      });
+
+      setFinalResponse({
+        content: 'Session terminated by user.',
+        isCompleted: false,
+        isError: false,
+        iterations: updated.length,
+      });
+
+      return updated;
+    });
+
+    if (resolveRef.current) {
+      resolveRef.current();
+      resolveRef.current = null;
+    }
+
+    try {
+      await AgentService.cancel();
+    } catch (err) {
+      console.error('Failed to cancel agent on backend:', err);
+    }
   }, []);
 
   return {
