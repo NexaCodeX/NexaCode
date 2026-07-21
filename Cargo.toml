@@ -1,6 +1,0 @@
-[workspace]
-members = [
-    "crates/nexacode-core",
-    "crates/nexacode-desktop",
-]
-resolver = "2"
